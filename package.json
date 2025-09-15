@@ -1,0 +1,85 @@
+{
+  "name": "vsx",
+  "displayName": "vsx",
+  "description": "VSX",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.103.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "vsx.helloWorld",
+        "title": "Hello World"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "myExtensionContainer",
+          "title": "My Extension",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "myExtensionContainer": [
+        {
+          "id": "myView",
+          "name": "Main Panel",
+          "type": "webview",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "VSX",
+      "properties": {
+        "vsx.apiKey.gemini": {
+          "type": "string",
+          "default": "",
+          "description": "API key for Google Gemini AI models",
+          "scope": "application"
+        },
+        "vsx.apiKey.nvidia": {
+          "type": "string",
+          "default": "",
+          "description": "API key for NVIDIA AI models",
+          "scope": "application"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "pretest": "npm run lint",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.103.0",
+    "@vitejs/plugin-react": "^5.0.2",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.34.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "vite": "^7.1.4"
+  },
+  "dependencies": {
+    "@radix-ui/react-slot": "^1.2.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.542.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "tailwind-merge": "^3.3.1",
+    "node-fetch": "^2.6.7"
+  }
+}

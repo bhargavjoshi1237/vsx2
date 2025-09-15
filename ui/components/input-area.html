@@ -1,0 +1,123 @@
+<div
+  class="input-area bg-dark-secondary min-h-[250px] rounded-md w-[90%] ml-3 mr-3 mb-3 bg-[#313131] p-2 flex items-center space-x-2"
+  style="max-height: 1000px; overflow: visible;">
+     <div class="w-full flex flex-col justify-between h-full">
+        <div class="flex-shrink-0">
+            <div class="flex gap-2">
+                
+                <div id="attachFileChip"
+                    class="border rounded-md mb-1 border-gray-700 h-fit w-fit gap-2 flex pl-2 pr-2 items-center justify-center cursor-pointer">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+                        <path fill="currentColor"
+                            d="M16.5,6.5 L8,15 C6.62,16.38 4.38,16.38 3,15 C1.62,13.62 1.62,11.38 3,10 L11.5,1.5 C13.43,-0.43 16.57,-0.43 18.5,1.5 C20.43,3.43 20.43,6.57 18.5,8.5 L10,17 C9.45,17.55 8.63,17.55 8.07,17 C7.52,16.45 7.52,15.63 8.07,15.07 C8.62,14.52 9.44,14.52 10,15.07 C10.26,15.33 10.26,15.78 10,16.04 L2,24.04 C1.74,24.3 1.29,24.3 1.03,24.04 C0.77,23.78 0.77,23.33 1.03,23.07 L9.03,15.07 C11.05,13.05 14.95,13.05 16.97,15.07 C19,17.1 19,21 16.97,23.03 L8.97,31.03 C6.95,33.05 3.05,33.05 1.03,31.03 C-0.99,29.01 -0.99,25.11 1.03,23.09 L9.03,15.09"
+                            />
+                    </svg>
+                    <p class="text-[7px] text-[#e7e7e7]">Attach</p>
+                    
+                </div>
+                
+            </div>
+        </div>
+        <div class="w-full flex-grow overflow-auto max-h-[700px]">
+      <textarea id="inputTextArea"
+        class="w-full p-2 mb-1 bg-transparent text-[#e7e7e7] rounded resize-none outline-none text-sm"
+        placeholder="Type your message here..."></textarea>
+        </div>
+        <div class="flex items-center flex-shrink-0 ml-2">
+            <div class="w-full flex gap-2 items-center">
+                <div x-data="{ open: false, selected: 'Ask' }" class="relative" id="mode-dropdown">
+                    <button @click="open = !open" @click.away="open = false"
+                        class="text-xs text-[#e7e7e7] focus:outline-none" :aria-expanded="open.toString()">
+                        <span x-text="selected"></span>
+                    </button>
+                    <div x-show="open" x-transition:enter="transition ease-out duration-100 rounded-lg"
+                        x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+                        x-transition:leave="transition ease-in duration-75"
+                        x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                        class="absolute bottom-full mb-2 w-50 bg-[#1e1e1e]  overflow-hidden z-50"
+                        style="display: none; background-color: #202020; border-radius: 10%;">
+
+                        <ul class="text-sm text-[#e7e7e7]" id="mode-list">
+                            <li class="px-4 py-3 text-gray-400 text-center flex items-center justify-center space-x-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" class="animate-spin"><path fill="currentColor" d="M10.72,19.9a8,8,0,0,1-6.5-9.79A7.77,7.77,0,0,1,10.4,4.16a8,8,0,0,1,9.49,6.52A1.54,1.54,0,0,0,21.38,12h.13a1.37,1.37,0,0,0,1.38-1.54,11,11,0,1,0-12.7,12.39A1.54,1.54,0,0,0,12,21.34h0A1.47,1.47,0,0,0,10.72,19.9Z"><animateTransform attributeName="transform" dur="0.75s" repeatCount="indefinite" type="rotate" values="0 12 12;360 12 12"/></path></svg>
+                                <span>Loading modes...</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="mx-2 text-xs">|</div>
+                <!-- Converted Radix Dropdown to Tailwind HTML -->
+                <div x-data="{ open: false, selected: 'Loading Models...' }" class="relative" id="model-dropdown">
+                    <button @click="open = !open" @click.away="open = false"
+                        class="text-xs text-[#e7e7e7] focus:outline-none" :aria-expanded="open.toString()">
+                        <span x-text="selected"></span>
+                    </button>
+                    <div x-show="open" x-transition:enter="transition ease-out duration-100"
+                        x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+                        x-transition:leave="transition ease-in duration-75"
+                        x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                        class="absolute bottom-full mb-2 w-64 bg-[#1e1e1e] rounded-lg shadow-xl overflow-hidden z-50"
+                        style="display: none; background-color: #202020; border: #474747;">
+
+                        <ul class="text-sm text-[#e7e7e7] divide-y divide-gray-700" id="model-list">
+                            <!-- Models will be populated dynamically -->
+                            <li class="px-4 py-3 text-gray-400 text-center flex items-center justify-center space-x-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" class="animate-spin"><path fill="currentColor" d="M10.72,19.9a8,8,0,0,1-6.5-9.79A7.77,7.77,0,0,1,10.4,4.16a8,8,0,0,1,9.49,6.52A1.54,1.54,0,0,0,21.38,12h.13a1.37,1.37,0,0,0,1.38-1.54,11,11,0,1,0-12.7,12.39A1.54,1.54,0,0,0,12,21.34h0A1.47,1.47,0,0,0,10.72,19.9Z"><animateTransform attributeName="transform" dur="0.75s" repeatCount="indefinite" type="rotate" values="0 12 12;360 12 12"/></path></svg>
+                                <span>Loading models...</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="ml-auto flex gap-4 items-center mr-1">
+                <button class="text-[#e7e7e7]">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="m22.61 18.99l-9.08-9.08c.93-2.34.45-5.1-1.44-7C9.79.61 6.21.4 3.66 2.26L7.5 6.11L6.08 7.52L2.25 3.69C.39 6.23.6 9.82 2.9 12.11c1.86 1.86 4.57 2.35 6.89 1.48l9.11 9.11c.39.39 1.02.39 1.41 0l2.3-2.3c.4-.38.4-1.01 0-1.41m-3 1.6l-9.46-9.46c-.61.45-1.29.72-2 .82c-1.36.2-2.79-.21-3.83-1.25C3.37 9.76 2.93 8.5 3 7.26l3.09 3.09l4.24-4.24l-3.09-3.09c1.24-.07 2.49.37 3.44 1.31a4.47 4.47 0 0 1 1.24 3.96a4.35 4.35 0 0 1-.88 1.96l9.45 9.45z"/></svg>
+                </button>
+                <button class="text-[#e7e7e7]">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24">
+                        <path fill="currentColor" d="M2.01 21L23 12L2.01 3L2 10l15 2l-15 2z"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- You need to include Alpine.js for the dropdown to be interactive -->
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<script>
+// Autosize textarea while allowing the container to grow until 1000px
+(() => {
+    const textarea = document.getElementById('inputTextArea');
+    const container = document.querySelector('.input-area');
+    if (!textarea || !container) return;
+
+    const maxContainerHeight = 250; // px
+
+    function resize() {
+        textarea.style.height = 'auto';
+        const taHeight = textarea.scrollHeight;
+
+        // compute available space inside the container: we only grow the textarea while
+        // the container height is less than maxContainerHeight
+        const containerRect = container.getBoundingClientRect();
+        const currentContainerHeight = containerRect.height;
+
+        if (currentContainerHeight < maxContainerHeight) {
+            // set textarea to its scrollHeight so it expands
+            textarea.style.height = taHeight + 'px';
+            // after expanding, if container exceeds max, lock textarea and enable container scroll
+            if (container.getBoundingClientRect().height > maxContainerHeight) {
+                textarea.style.height = (taHeight - (container.getBoundingClientRect().height - maxContainerHeight)) + 'px';
+            }
+        } else {
+            // container already at max - cap textarea and allow scrolling
+            textarea.style.height = Math.min(taHeight, 200) + 'px';
+        }
+    }
+
+    textarea.addEventListener('input', resize);
+    // initial resize
+    setTimeout(resize, 0);
+})();
+</script>
