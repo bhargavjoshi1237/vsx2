@@ -43,19 +43,15 @@ function createRouter() {
   }
 
   async function sendPrompt(modelId, prompt) {
-    // If the model belongs to NVIDIA (or looks like an NVIDIA model id),
-    // forward the request to the NVIDIA sender so the correct client handles it.
     try {
       const models = await getModels();
       const byId = models.byId || {};
       const modelMeta = modelId && byId[modelId] ? byId[modelId] : null;
       const looksLikeNvidia = typeof modelId === 'string' && modelId.includes('/');
       if ((modelMeta && modelMeta.provider === 'nvidia') || (!modelMeta && looksLikeNvidia)) {
-        // delegate to NVIDIA sender
         return await sendPromptNvidia(modelId, prompt);
       }
     } catch {
-      // ignore and continue to gemini path
     }
 
     const apiKey = getApiKey();

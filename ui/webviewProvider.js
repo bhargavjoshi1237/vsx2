@@ -253,9 +253,10 @@ class MyWebviewProvider {
                     eventCountEl.textContent = 'Events: ' + responseData.events;
                   }
 
-                  // Handle thinking data
-                  if (responseData.reasoning && responseData.reasoning.trim()) {
-                    setupThinkingToggle(messageNode, responseData.reasoning);
+                  // Handle thinking data - prefer thinking_text from parser
+                  const thinkingData = responseData.thinking_text || responseData.reasoning || '';
+                  if (thinkingData && thinkingData.trim()) {
+                    setupThinkingToggle(messageNode, thinkingData);
                   }
 
                 } catch (e) {
@@ -493,16 +494,24 @@ class MyWebviewProvider {
     let found = null;
     nodes.forEach(n => { if (n.dataset.requestId === String(rid)) found = n; });
     
-    const text = m.response && m.response.text ? m.response.text : 
+    const text = m.response && m.response.plain_text ? m.response.plain_text :
+                 (m.response && m.response.text ? m.response.text : 
                  (m.error ? ('Error: ' + m.error) : 
-                 (m.response && m.response.raw ? JSON.stringify(m.response.raw) : ''));
+                 (m.response && m.response.raw ? JSON.stringify(m.response.raw) : '')));
+
+      const thinking = m.response && m.response.thinking_text ? m.response.thinking_text :
+                 (m.response && m.response.text ? m.response.text : 
+                 (m.error ? ('Error: ' + m.error) : 
+                 (m.response && m.response.raw ? JSON.stringify(m.response.raw) : '')));
 
     if (found) {
       const textEl = found.querySelector('.message-text');
       const metaEl = found.querySelector('.message-meta');
+      const thinkingEl = found.querySelector('.thinking-text');
       
       if (textEl) textEl.innerText = text;
-      
+      if (thinkingEl) thinkingEl.innerText = thinking;
+
       if (metaEl) {
         // Hide spinner and status
         const spinnerEl = metaEl.querySelector('.assistant-spinner');
@@ -552,12 +561,16 @@ class MyWebviewProvider {
       </body>
       </html>
     `;
-    try {
-      this.router = routerFactory ? routerFactory(this.context) : null;
-    } catch (err) {
-      console.error('Failed to create router:', err);
-      this.router = null;
-    }
+      try {
+        this.router = routerFactory ? routerFactory(this.context) : null;
+      } catch (err) {
+        console.error('Failed to create router:', err);
+        this.router = null;
+      }
+
+      // Parser for normalizing responses into plain_text and thinking_text
+      let parser = null;
+    try { parser = require('../route/parser'); } catch { parser = null; }
 
     webviewView.webview.onDidReceiveMessage(
       async message => {
@@ -620,7 +633,19 @@ class MyWebviewProvider {
                 resp = await this.router.sendPrompt(modelId, prompt);
               }
               }
-              this.webviewView.webview.postMessage({ command: 'promptResponse', requestId, response: resp });
+              // Use parser to extract exact plain_text and thinking_text when available
+              try {
+                const parsed = parser ? parser.parseResponse(resp && resp.raw !== undefined ? resp.raw : resp) : { plain_text: '', thinking_text: '', metadata: {} };
+                // Attach parsed fields onto the response object sent to the webview
+                const responseForUI = Object.assign({}, resp);
+                responseForUI.plain_text = parsed.plain_text;
+                responseForUI.thinking_text = parsed.thinking_text;
+                responseForUI.metadata = parsed.metadata || responseForUI.metadata || {};
+                this.webviewView.webview.postMessage({ command: 'promptResponse', requestId, response: responseForUI });
+              } catch {
+                // Fallback to original behavior
+                this.webviewView.webview.postMessage({ command: 'promptResponse', requestId, response: resp });
+              }
             } catch (err) {
               const requestId = message.requestId;
               this.webviewView.webview.postMessage({ command: 'promptResponse', requestId, error: String(err) });
