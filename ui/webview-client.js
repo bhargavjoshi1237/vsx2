@@ -18,6 +18,16 @@
   // store prompt metadata by requestId so reload/edit can resend
   const messageStore = new Map();
 
+  // Performance optimization state
+  let loadingStates = new Map();
+  let uiUpdateQueue = [];
+  let uiUpdateTimer = null;
+  let performanceMetrics = {
+    uiUpdatesProcessed: 0,
+    averageUpdateTime: 0,
+    lastUpdateTime: null
+  };
+
   function appendMessage(role, text, meta, responseData) {
     try {
       const tplId = role === 'user' ? 'template-chat-user' : 'template-chat-assistant';
@@ -841,6 +851,10 @@ function createInlineEditor(userNode, initialText) {
     const m = event.data;
     if (!m || !m.command) return;
     switch (m.command) {
+      case 'batchedUpdates':
+        handleBatchedUpdates(m);
+        break;
+        
       case 'filesSelected':
         if (Array.isArray(m.files)) {
           m.files.forEach(f => { if (!selectedFiles.find(sf => sf.path === f.path)) selectedFiles.push(f); });
@@ -1114,3 +1128,1310 @@ function createInlineEditor(userNode, initialText) {
   try { vscode.postMessage({ command: 'getModels' }); } catch (e) {}
   try { vscode.postMessage({ command: 'getModes' }); } catch (e) {}
 })();
+  // Legacy Mode JavaScript Functions
+  
+  // Global functions for Legacy Mode interactions
+  window.confirmTodo = function(todoId, approved, requestId) {
+    try {
+      vscode.postMessage({
+        command: 'legacyModeConfirmationResponse',
+        todoId: todoId,
+        approved: approved,
+        feedback: approved ? 'Approved by user' : '',
+        requestId: requestId
+      });
+      
+      // Hide confirmation UI
+      const confirmationEl = document.querySelector(`[data-todo-id="${todoId}"]`);
+      if (confirmationEl) {
+        confirmationEl.style.display = 'none';
+      }
+    } catch (e) {
+      console.error('Error confirming TODO:', e);
+    }
+  };
+  
+  window.showFeedbackForm = function(todoId, requestId) {
+    try {
+      const feedbackHtml = `
+        <div class="legacy-feedback-dialog fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" id="feedback-dialog-${todoId}">
+          <div class="bg-gray-800 border border-gray-600 rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 class="text-lg font-semibold text-red-400 mb-3">Provide Feedback</h3>
+            <div class="mb-4">
+              <p class="text-gray-300 mb-3">Please explain what needs to be improved:</p>
+              <textarea id="feedback-text-${todoId}" 
+                        class="w-full h-24 bg-gray-700 border border-gray-600 rounded p-2 text-gray-100 resize-none"
+                        placeholder="Describe what needs to be changed or improved..."></textarea>
+            </div>
+            <div class="flex gap-3">
+              <button class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded" 
+                      onclick="submitFeedback('${todoId}', '${requestId}')">
+                Submit Feedback
+              </button>
+              <button class="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded" 
+                      onclick="closeFeedbackDialog('${todoId}')">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      document.body.insertAdjacentHTML('beforeend', feedbackHtml);
+    } catch (e) {
+      console.error('Error showing feedback form:', e);
+    }
+  };
+  
+  window.submitFeedback = function(todoId, requestId) {
+    try {
+      const feedbackTextarea = document.getElementById(`feedback-text-${todoId}`);
+      const feedback = feedbackTextarea ? feedbackTextarea.value.trim() : '';
+      
+      if (!feedback) {
+        alert('Please provide feedback before submitting.');
+        return;
+      }
+      
+      vscode.postMessage({
+        command: 'legacyModeConfirmationResponse',
+        todoId: todoId,
+        approved: false,
+        feedback: feedback,
+        requestId: requestId
+      });
+      
+      closeFeedbackDialog(todoId);
+    } catch (e) {
+      console.error('Error submitting feedback:', e);
+    }
+  };
+  
+  window.closeFeedbackDialog = function(todoId) {
+    try {
+      const dialog = document.getElementById(`feedback-dialog-${todoId}`);
+      if (dialog) {
+        dialog.remove();
+      }
+    } catch (e) {
+      console.error('Error closing feedback dialog:', e);
+    }
+  };
+  
+  window.confirmTodoDialog = function(todoId, approved, feedback, requestId) {
+    try {
+      vscode.postMessage({
+        command: 'legacyModeConfirmationResponse',
+        todoId: todoId,
+        approved: approved,
+        feedback: feedback,
+        requestId: requestId
+      });
+      
+      // Close dialog
+      const dialog = document.querySelector('.legacy-confirmation-dialog');
+      if (dialog) {
+        dialog.remove();
+      }
+    } catch (e) {
+      console.error('Error confirming TODO dialog:', e);
+    }
+  };
+  
+  window.showFeedbackDialog = function(todoId, requestId) {
+    try {
+      const existingDialog = document.querySelector('.legacy-confirmation-dialog');
+      if (existingDialog) {
+        existingDialog.remove();
+      }
+      
+      showFeedbackForm(todoId, requestId);
+    } catch (e) {
+      console.error('Error showing feedback dialog:', e);
+    }
+  };
+  
+  window.legacySessionAction = function(action, requestId) {
+    try {
+      vscode.postMessage({
+        command: 'legacyModeSessionAction',
+        action: action,
+        requestId: requestId,
+        data: {}
+      });
+    } catch (e) {
+      console.error('Error performing session action:', e);
+    }
+  };
+  
+  window.executeLegacyTool = function(toolName, params, requestId) {
+    try {
+      vscode.postMessage({
+        command: 'legacyModeToolExecution',
+        toolName: toolName,
+        params: params,
+        requestId: requestId
+      });
+    } catch (e) {
+      console.error('Error executing Legacy Mode tool:', e);
+    }
+  };
+  
+  // Handle Legacy Mode updates from the webview provider
+  function handleLegacyModeUpdate(updateType, data) {
+    try {
+      switch (updateType) {
+        case 'session_created':
+          renderLegacySessionCreated(data);
+          break;
+        case 'todo_created':
+          renderLegacyTodoCreated(data);
+          break;
+        case 'tool_executed':
+          renderLegacyToolExecuted(data);
+          break;
+        case 'confirmation_requested':
+          renderLegacyConfirmationRequest(data);
+          break;
+        case 'confirmation_processed':
+          renderLegacyConfirmationProcessed(data);
+          break;
+        case 'error_occurred':
+          renderLegacyError(data.context, data.message, data.suggestion);
+          break;
+        case 'session_paused':
+          renderLegacySessionPaused(data);
+          break;
+        case 'session_resumed':
+          renderLegacySessionResumed(data);
+          break;
+        case 'session_stopped':
+          renderLegacySessionStopped(data);
+          break;
+        case 'session_status':
+          renderLegacySessionStatus(data);
+          break;
+        default:
+          console.log('Unknown Legacy Mode update type:', updateType, data);
+      }
+    } catch (e) {
+      console.error('Error handling Legacy Mode update:', e);
+    }
+  }
+  
+  function renderLegacySessionCreated(data) {
+    const sessionEl = document.createElement('div');
+    sessionEl.className = 'legacy-session-notification bg-green-900 border border-green-600 rounded-lg p-3 mb-3';
+    sessionEl.innerHTML = `
+      <div class="flex items-center space-x-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" class="text-green-400">
+          <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5l1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+        </svg>
+        <span class="text-green-300 font-medium">Legacy Mode Session Created</span>
+      </div>
+      <div class="text-xs text-green-200 mt-2">
+        Session ID: ${data.sessionId}<br>
+        Phase: ${data.phase}<br>
+        Started: ${data.startTime}
+      </div>
+    `;
+    
+    chatMessagesContainer.appendChild(sessionEl);
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+  }
+  
+  function renderLegacyTodoCreated(data) {
+    const todoEl = renderLegacyTodo(data.todo);
+    chatMessagesContainer.appendChild(todoEl);
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+  }
+  
+  function renderLegacyToolExecuted(data) {
+    const toolEl = renderLegacyTool(data.toolName, data.params, data.result);
+    chatMessagesContainer.appendChild(toolEl);
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+  }
+  
+  function renderLegacyConfirmationRequest(data) {
+    const confirmationEl = document.createElement('div');
+    confirmationEl.className = 'legacy-confirmation-request bg-yellow-900 border border-yellow-600 rounded-lg p-4 mb-3';
+    confirmationEl.setAttribute('data-todo-id', data.todoId);
+    
+    confirmationEl.innerHTML = `
+      <div class="flex items-center space-x-2 mb-3">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" class="text-yellow-400">
+          <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+        </svg>
+        <span class="text-yellow-300 font-medium">Confirmation Required</span>
+      </div>
+      <div class="mb-3">
+        <div class="text-sm text-yellow-100 mb-2"><strong>Task:</strong> ${data.todoDescription}</div>
+        <div class="text-sm text-yellow-100 mb-3"><strong>Result:</strong> ${data.result}</div>
+        <div class="text-sm text-yellow-200">Was this task completed successfully?</div>
+      </div>
+      <div class="flex gap-3">
+        <button class="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded text-sm" 
+                onclick="confirmTodo('${data.todoId}', true, '${data.requestId}')">
+          ✓ Yes, Approve
+        </button>
+        <button class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded text-sm" 
+                onclick="showFeedbackForm('${data.todoId}', '${data.requestId}')">
+          ✗ No, Needs Work
+        </button>
+      </div>
+    `;
+    
+    chatMessagesContainer.appendChild(confirmationEl);
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+  }
+  
+  function renderLegacyConfirmationProcessed(data) {
+    const confirmationEl = document.querySelector(`[data-todo-id="${data.todoId}"]`);
+    if (confirmationEl) {
+      confirmationEl.style.display = 'none';
+    }
+    
+    const processedEl = document.createElement('div');
+    processedEl.className = `legacy-confirmation-processed ${data.approved ? 'bg-green-900 border-green-600' : 'bg-red-900 border-red-600'} border rounded-lg p-3 mb-3`;
+    
+    processedEl.innerHTML = `
+      <div class="flex items-center space-x-2">
+        <span class="text-lg">${data.approved ? '✅' : '❌'}</span>
+        <span class="text-sm font-medium ${data.approved ? 'text-green-300' : 'text-red-300'}">
+          TODO ${data.approved ? 'Approved' : 'Rejected'}
+        </span>
+      </div>
+      ${data.feedback ? `<div class="text-xs ${data.approved ? 'text-green-200' : 'text-red-200'} mt-2">Feedback: ${data.feedback}</div>` : ''}
+    `;
+    
+    chatMessagesContainer.appendChild(processedEl);
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+  }
+  
+  function renderLegacySessionPaused(data) {
+    const pausedEl = document.createElement('div');
+    pausedEl.className = 'legacy-session-paused bg-yellow-900 border border-yellow-600 rounded-lg p-3 mb-3';
+    pausedEl.innerHTML = `
+      <div class="flex items-center space-x-2">
+        <span class="text-lg">⏸️</span>
+        <span class="text-yellow-300 font-medium">Session Paused</span>
+      </div>
+      <div class="text-xs text-yellow-200 mt-2">Session ${data.requestId} has been paused</div>
+    `;
+    
+    chatMessagesContainer.appendChild(pausedEl);
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+  }
+  
+  function renderLegacySessionResumed(data) {
+    const resumedEl = document.createElement('div');
+    resumedEl.className = 'legacy-session-resumed bg-green-900 border border-green-600 rounded-lg p-3 mb-3';
+    resumedEl.innerHTML = `
+      <div class="flex items-center space-x-2">
+        <span class="text-lg">▶️</span>
+        <span class="text-green-300 font-medium">Session Resumed</span>
+      </div>
+      <div class="text-xs text-green-200 mt-2">Session ${data.requestId} has been resumed</div>
+    `;
+    
+    chatMessagesContainer.appendChild(resumedEl);
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+  }
+  
+  function renderLegacySessionStopped(data) {
+    const stoppedEl = document.createElement('div');
+    stoppedEl.className = 'legacy-session-stopped bg-red-900 border border-red-600 rounded-lg p-3 mb-3';
+    stoppedEl.innerHTML = `
+      <div class="flex items-center space-x-2">
+        <span class="text-lg">⏹️</span>
+        <span class="text-red-300 font-medium">Session Stopped</span>
+      </div>
+      <div class="text-xs text-red-200 mt-2">Session ${data.requestId} has been stopped</div>
+    `;
+    
+    chatMessagesContainer.appendChild(stoppedEl);
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+  }
+  
+  function renderLegacySessionStatus(data) {
+    const statusEl = document.createElement('div');
+    statusEl.className = 'legacy-session-status bg-blue-900 border border-blue-600 rounded-lg p-3 mb-3';
+    statusEl.innerHTML = `
+      <div class="flex items-center space-x-2 mb-2">
+        <span class="text-lg">📊</span>
+        <span class="text-blue-300 font-medium">Session Status</span>
+      </div>
+      <div class="text-xs text-blue-200 space-y-1">
+        <div>Session ID: ${data.requestId}</div>
+        <div>Phase: ${data.phase}</div>
+        <div>Started: ${data.startTime}</div>
+        <div>Last Activity: ${data.lastActivity}</div>
+        <div>TODOs: ${data.todoCount}</div>
+        <div>Execution Log Entries: ${data.executionLogCount}</div>
+      </div>
+    `;
+    
+    chatMessagesContainer.appendChild(statusEl);
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+  }
+
+  // Enhanced message listener to handle Legacy Mode updates
+  const originalMessageListener = window.addEventListener;
+  window.addEventListener('message', (event) => {
+    try {
+      const message = event.data;
+      
+      if (message.command === 'legacyModeUpdate') {
+        handleLegacyModeUpdate(message.updateType, message.data);
+        return;
+      }
+      
+      // Handle other message types...
+      if (message.command === 'promptResponse') {
+        const requestId = message.requestId;
+        const response = message.response;
+        const error = message.error;
+        
+        // Find the assistant message with this requestId
+        const assistantNode = chatMessagesContainer.querySelector(`.assistant-message[data-request-id="${requestId}"]`);
+        if (assistantNode) {
+          const textEl = assistantNode.querySelector('.message-text');
+          const metaEl = assistantNode.querySelector('.message-meta');
+          
+          if (error) {
+            if (textEl) textEl.textContent = `Error: ${error}`;
+            if (metaEl) {
+              const metaTextEl = metaEl.querySelector('.meta-text');
+              const spinnerEl = metaEl.querySelector('.assistant-spinner');
+              const statusEl = metaEl.querySelector('.status-text');
+              
+              if (metaTextEl) metaTextEl.textContent = 'Error';
+              if (spinnerEl) spinnerEl.style.display = 'none';
+              if (statusEl) statusEl.style.display = 'none';
+            }
+          } else if (response) {
+            const text = response.plain_text || response.text || '';
+            const meta = response.metadata || {};
+            
+            if (textEl) renderMessageContent(textEl, text);
+            if (metaEl) {
+              const metaTextEl = metaEl.querySelector('.meta-text');
+              const spinnerEl = metaEl.querySelector('.assistant-spinner');
+              const statusEl = metaEl.querySelector('.status-text');
+              
+              if (metaTextEl) metaTextEl.textContent = 'Complete';
+              if (spinnerEl) spinnerEl.style.display = 'none';
+              if (statusEl) statusEl.style.display = 'none';
+              
+              populateEnhancedMetadata(assistantNode, response);
+            }
+          }
+        }
+      }
+      
+      // Handle other existing message types...
+      if (message.command === 'modelsResponse') {
+        populateModelDropdown(message.models, message.error);
+      }
+      
+      if (message.command === 'modesResponse') {
+        populateModeDropdown(message.modes, message.error);
+      }
+      
+      if (message.command === 'filesSelected') {
+        selectedFiles = message.files || [];
+        updateFileChips();
+      }
+      
+      if (message.command === 'filePickerCanceled') {
+        // Handle file picker cancellation if needed
+      }
+      
+      if (message.command === 'filePickerError') {
+        console.error('File picker error:', message.error);
+      }
+      
+      if (message.command === 'apiKeyChanged') {
+        // Refresh models when API key changes
+        if (vscode) {
+          vscode.postMessage({ command: 'getModels' });
+        }
+      }
+      
+    } catch (e) {
+      console.error('Error handling message:', e);
+    }
+  });  
+// Legacy Mode JavaScript Functions
+  
+  // Global Legacy Mode state
+  let legacyModeState = {
+    currentSession: null,
+    activeTodos: [],
+    pendingVerifications: new Map(),
+    sessionHistory: []
+  };
+  
+  // Legacy Mode Session Management
+  function createLegacySession(sessionData) {
+    try {
+      legacyModeState.currentSession = {
+        id: sessionData.sessionId || generateSessionId(),
+        originalTask: sessionData.originalTask || '',
+        phase: sessionData.phase || 'planning',
+        startTime: sessionData.startTime || new Date().toISOString(),
+        todos: sessionData.todos || [],
+        executionLog: sessionData.executionLog || [],
+        modelId: sessionData.modelId || selectedModelId,
+        requestId: sessionData.requestId || ''
+      };
+      
+      renderLegacySessionDisplay();
+      return legacyModeState.currentSession;
+    } catch (e) {
+      console.error('Error creating Legacy Mode session:', e);
+      return null;
+    }
+  }
+  
+  function updateLegacySession(updates) {
+    try {
+      if (!legacyModeState.currentSession) return false;
+      
+      Object.assign(legacyModeState.currentSession, updates);
+      renderLegacySessionDisplay();
+      return true;
+    } catch (e) {
+      console.error('Error updating Legacy Mode session:', e);
+      return false;
+    }
+  }
+  
+  function stopLegacySession(sessionId) {
+    try {
+      if (legacyModeState.currentSession && legacyModeState.currentSession.id === sessionId) {
+        // Add to history
+        legacyModeState.sessionHistory.push({
+          ...legacyModeState.currentSession,
+          endTime: new Date().toISOString(),
+          status: 'stopped'
+        });
+        
+        // Clear current session
+        legacyModeState.currentSession = null;
+        legacyModeState.activeTodos = [];
+        legacyModeState.pendingVerifications.clear();
+        
+        // Notify extension
+        if (vscode) {
+          vscode.postMessage({
+            command: 'stopLegacySession',
+            sessionId: sessionId
+          });
+        }
+        
+        renderLegacySessionStopped(sessionId);
+      }
+    } catch (e) {
+      console.error('Error stopping Legacy Mode session:', e);
+    }
+  }
+  
+  // Legacy Mode TODO Management
+  function addLegacyTodo(todoData) {
+    try {
+      const todo = {
+        id: todoData.id || generateTodoId(),
+        description: todoData.description || '',
+        expectedResult: todoData.expectedResult || '',
+        status: todoData.status || 'pending',
+        createdAt: todoData.createdAt || new Date().toISOString(),
+        completedAt: todoData.completedAt || null,
+        result: todoData.result || null,
+        toolCalls: todoData.toolCalls || []
+      };
+      
+      legacyModeState.activeTodos.push(todo);
+      
+      if (legacyModeState.currentSession) {
+        legacyModeState.currentSession.todos = legacyModeState.activeTodos;
+      }
+      
+      renderLegacyTodoItem(todo);
+      return todo;
+    } catch (e) {
+      console.error('Error adding Legacy Mode TODO:', e);
+      return null;
+    }
+  }
+  
+  function updateLegacyTodo(todoId, updates) {
+    try {
+      const todoIndex = legacyModeState.activeTodos.findIndex(t => t.id === todoId);
+      if (todoIndex === -1) return false;
+      
+      Object.assign(legacyModeState.activeTodos[todoIndex], updates);
+      
+      if (legacyModeState.currentSession) {
+        legacyModeState.currentSession.todos = legacyModeState.activeTodos;
+      }
+      
+      renderLegacyTodoItem(legacyModeState.activeTodos[todoIndex]);
+      return true;
+    } catch (e) {
+      console.error('Error updating Legacy Mode TODO:', e);
+      return false;
+    }
+  }
+  
+  function completeLegacyTodo(todoId, result) {
+    try {
+      const updates = {
+        status: 'done',
+        completedAt: new Date().toISOString(),
+        result: result
+      };
+      
+      return updateLegacyTodo(todoId, updates);
+    } catch (e) {
+      console.error('Error completing Legacy Mode TODO:', e);
+      return false;
+    }
+  }
+  
+  // Legacy Mode Verification System
+  function requestTodoVerification(todoId, result) {
+    try {
+      const todo = legacyModeState.activeTodos.find(t => t.id === todoId);
+      if (!todo) return false;
+      
+      legacyModeState.pendingVerifications.set(todoId, {
+        todo: todo,
+        result: result,
+        timestamp: new Date().toISOString()
+      });
+      
+      renderLegacyVerificationRequest(todoId, todo, result);
+      return true;
+    } catch (e) {
+      console.error('Error requesting TODO verification:', e);
+      return false;
+    }
+  }
+  
+  function verifyTodo(todoId, approved, feedback) {
+    try {
+      const verification = legacyModeState.pendingVerifications.get(todoId);
+      if (!verification) return false;
+      
+      // Remove from pending
+      legacyModeState.pendingVerifications.delete(todoId);
+      
+      // Send verification response to extension
+      if (vscode) {
+        vscode.postMessage({
+          command: 'verifyTodo',
+          todoId: todoId,
+          approved: approved,
+          feedback: feedback || '',
+          sessionId: legacyModeState.currentSession?.id
+        });
+      }
+      
+      // Update UI
+      renderLegacyVerificationProcessed(todoId, approved, feedback);
+      
+      if (approved) {
+        completeLegacyTodo(todoId, verification.result);
+      }
+      
+      return true;
+    } catch (e) {
+      console.error('Error verifying TODO:', e);
+      return false;
+    }
+  }
+  
+  // Legacy Mode Tool Call Rendering
+  function renderLegacyToolCall(toolCall) {
+    try {
+      const toolEl = document.createElement('div');
+      toolEl.className = 'legacy-tool-item';
+      toolEl.dataset.toolId = toolCall.id;
+      
+      const statusIcon = toolCall.success ? '✅' : '❌';
+      const statusClass = toolCall.success ? 'success' : 'failed';
+      
+      toolEl.innerHTML = `
+        <div class="tool-header">
+          <span class="tool-icon">🔧</span>
+          <span class="tool-name">${toolCall.toolName}</span>
+          <span class="tool-timestamp">${new Date(toolCall.timestamp).toLocaleTimeString()}</span>
+        </div>
+        <div class="tool-details">
+          <div class="tool-input">
+            <strong>Input:</strong>
+            <pre class="tool-params">${JSON.stringify(toolCall.params, null, 2)}</pre>
+          </div>
+          ${toolCall.result ? `
+            <div class="tool-output">
+              <strong>Output:</strong>
+              <pre class="tool-result">${JSON.stringify(toolCall.result, null, 2)}</pre>
+            </div>
+          ` : ''}
+          ${toolCall.error ? `
+            <div class="tool-error">
+              <strong>Error:</strong>
+              <pre class="error-message">${toolCall.error}</pre>
+            </div>
+          ` : ''}
+        </div>
+        <div class="tool-status ${statusClass}">${statusIcon} ${toolCall.success ? 'Success' : 'Failed'}</div>
+      `;
+      
+      appendToLegacyContent(toolEl);
+      return toolEl;
+    } catch (e) {
+      console.error('Error rendering Legacy Mode tool call:', e);
+      return null;
+    }
+  }
+  
+  // Legacy Mode Terminal Command Rendering
+  function renderLegacyTerminalCommand(command) {
+    try {
+      const terminalEl = document.createElement('div');
+      terminalEl.className = 'legacy-terminal-item';
+      terminalEl.dataset.commandId = command.id;
+      
+      const statusIcon = command.success ? '✅' : '❌';
+      
+      terminalEl.innerHTML = `
+        <div class="terminal-header">
+          <span class="terminal-icon">💻</span>
+          <span class="terminal-label">Terminal Command</span>
+          <span class="terminal-timestamp">${new Date(command.timestamp).toLocaleTimeString()}</span>
+        </div>
+        <div class="terminal-content">
+          <div class="terminal-command">
+            <span class="command-prompt">$</span>
+            <code>${command.command}</code>
+          </div>
+          ${command.output ? `
+            <div class="terminal-output">
+              <pre>${command.output}</pre>
+            </div>
+          ` : ''}
+          ${command.error ? `
+            <div class="terminal-error">
+              <pre>${command.error}</pre>
+            </div>
+          ` : ''}
+        </div>
+        <div class="terminal-status">
+          <span class="status-${command.success ? 'success' : 'error'}">
+            ${statusIcon} Exit code: ${command.exitCode || 0}
+          </span>
+        </div>
+      `;
+      
+      appendToLegacyContent(terminalEl);
+      return terminalEl;
+    } catch (e) {
+      console.error('Error rendering Legacy Mode terminal command:', e);
+      return null;
+    }
+  }
+  
+  // Legacy Mode Error Rendering
+  function renderLegacyError(errorData) {
+    try {
+      const errorEl = document.createElement('div');
+      errorEl.className = 'legacy-error-item';
+      
+      errorEl.innerHTML = `
+        <div class="error-header">
+          <span class="error-icon">⚠️</span>
+          <h4 class="error-title">${errorData.errorType || 'Error'}</h4>
+        </div>
+        <div class="error-message">${errorData.message}</div>
+        ${errorData.context ? `
+          <div class="error-context">
+            <strong>Context:</strong> ${errorData.context}
+          </div>
+        ` : ''}
+        ${errorData.suggestions && errorData.suggestions.length > 0 ? `
+          <div class="error-suggestions">
+            <strong>Suggested Actions:</strong>
+            <ul>
+              ${errorData.suggestions.map(s => `<li>${s}</li>`).join('')}
+            </ul>
+          </div>
+        ` : ''}
+        <div class="error-actions">
+          <button class="retry-btn" onclick="retryLastAction()">Retry</button>
+          <button class="skip-btn" onclick="skipCurrentTodo()">Skip</button>
+          <button class="stop-btn" onclick="stopLegacySession('${legacyModeState.currentSession?.id}')">Stop Session</button>
+        </div>
+      `;
+      
+      appendToLegacyContent(errorEl);
+      return errorEl;
+    } catch (e) {
+      console.error('Error rendering Legacy Mode error:', e);
+      return null;
+    }
+  }
+  
+  // Legacy Mode UI Rendering Functions
+  function renderLegacySessionDisplay() {
+    try {
+      if (!legacyModeState.currentSession) return;
+      
+      const session = legacyModeState.currentSession;
+      const completedTodos = session.todos.filter(t => t.status === 'done').length;
+      const totalTodos = session.todos.length;
+      const progressPercent = totalTodos > 0 ? (completedTodos / totalTodos) * 100 : 0;
+      
+      const sessionEl = document.createElement('div');
+      sessionEl.className = 'legacy-session-item';
+      sessionEl.dataset.sessionId = session.id;
+      
+      sessionEl.innerHTML = `
+        <div class="session-header">
+          <h2 class="session-title">Legacy Mode Session</h2>
+          <span class="session-id">${session.id}</span>
+          <button class="session-stop-btn" onclick="stopLegacySession('${session.id}')">Stop</button>
+        </div>
+        <div class="session-info">
+          <span class="session-time">Started: ${new Date(session.startTime).toLocaleString()}</span>
+          <span class="session-phase">Phase: <span class="phase-badge phase-${session.phase}">${session.phase}</span></span>
+        </div>
+        <div class="session-task">
+          <strong>Task:</strong> ${session.originalTask}
+        </div>
+        <div class="progress-container">
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: ${progressPercent}%"></div>
+          </div>
+          <span class="progress-text">${completedTodos}/${totalTodos} TODOs completed</span>
+        </div>
+      `;
+      
+      appendToLegacyContent(sessionEl);
+      return sessionEl;
+    } catch (e) {
+      console.error('Error rendering Legacy Mode session display:', e);
+      return null;
+    }
+  }
+  
+  function renderLegacyTodoItem(todo) {
+    try {
+      const todoEl = document.createElement('div');
+      todoEl.className = `legacy-todo-item todo-${todo.status}`;
+      todoEl.dataset.todoId = todo.id;
+      
+      const statusIcon = getStatusIcon(todo.status);
+      
+      todoEl.innerHTML = `
+        <div class="todo-header">
+          <span class="todo-status-icon">${statusIcon}</span>
+          <h4 class="todo-description">${todo.description}</h4>
+          <span class="todo-id">#${todo.id}</span>
+        </div>
+        <div class="todo-expected">
+          <strong>Expected Result:</strong> ${todo.expectedResult}
+        </div>
+        ${todo.result ? `
+          <div class="todo-result">
+            <strong>Actual Result:</strong> ${todo.result}
+          </div>
+        ` : ''}
+        <div class="todo-timestamps">
+          <span>Created: ${new Date(todo.createdAt).toLocaleString()}</span>
+          ${todo.completedAt ? `<span>Completed: ${new Date(todo.completedAt).toLocaleString()}</span>` : ''}
+        </div>
+      `;
+      
+      appendToLegacyContent(todoEl);
+      return todoEl;
+    } catch (e) {
+      console.error('Error rendering Legacy Mode TODO item:', e);
+      return null;
+    }
+  }
+  
+  function renderLegacyVerificationRequest(todoId, todo, result) {
+    try {
+      const verificationEl = document.createElement('div');
+      verificationEl.className = 'legacy-confirmation-request';
+      verificationEl.dataset.todoId = todoId;
+      
+      verificationEl.innerHTML = `
+        <div class="verification-header">
+          <h4>TODO Verification Required</h4>
+          <span class="todo-ref">#${todoId}</span>
+        </div>
+        <div class="verification-todo">
+          <strong>Description:</strong> ${todo.description}
+        </div>
+        <div class="verification-expected">
+          <strong>Expected:</strong> ${todo.expectedResult}
+        </div>
+        <div class="verification-result">
+          <strong>Actual Result:</strong> ${result}
+        </div>
+        <div class="verification-question">
+          <p>Does this TODO completion look correct?</p>
+        </div>
+        <div class="verification-buttons">
+          <button class="verify-approve-btn" onclick="verifyTodo('${todoId}', true)">✓ Approve</button>
+          <button class="verify-reject-btn" onclick="verifyTodo('${todoId}', false)">✗ Reject</button>
+        </div>
+        <div class="verification-feedback">
+          <textarea id="feedback-${todoId}" placeholder="Optional feedback..." rows="3"></textarea>
+        </div>
+      `;
+      
+      // Update button handlers to include feedback
+      const approveBtn = verificationEl.querySelector('.verify-approve-btn');
+      const rejectBtn = verificationEl.querySelector('.verify-reject-btn');
+      const feedbackTextarea = verificationEl.querySelector(`#feedback-${todoId}`);
+      
+      if (approveBtn) {
+        approveBtn.onclick = () => verifyTodo(todoId, true, feedbackTextarea?.value);
+      }
+      
+      if (rejectBtn) {
+        rejectBtn.onclick = () => verifyTodo(todoId, false, feedbackTextarea?.value);
+      }
+      
+      appendToLegacyContent(verificationEl);
+      return verificationEl;
+    } catch (e) {
+      console.error('Error rendering Legacy Mode verification request:', e);
+      return null;
+    }
+  }
+  
+  function renderLegacyVerificationProcessed(todoId, approved, feedback) {
+    try {
+      // Remove the verification request
+      const verificationEl = document.querySelector(`[data-todo-id="${todoId}"]`);
+      if (verificationEl) {
+        verificationEl.remove();
+      }
+      
+      // Show confirmation message
+      const confirmationEl = document.createElement('div');
+      confirmationEl.className = 'legacy-confirmation-processed';
+      
+      const statusIcon = approved ? '✅' : '❌';
+      const statusText = approved ? 'Approved' : 'Rejected';
+      const statusClass = approved ? 'success' : 'rejected';
+      
+      confirmationEl.innerHTML = `
+        <div class="confirmation-header">
+          <span class="confirmation-icon">${statusIcon}</span>
+          <span class="confirmation-status ${statusClass}">TODO ${statusText}</span>
+          <span class="todo-ref">#${todoId}</span>
+        </div>
+        ${feedback ? `
+          <div class="confirmation-feedback">
+            <strong>Feedback:</strong> ${feedback}
+          </div>
+        ` : ''}
+      `;
+      
+      appendToLegacyContent(confirmationEl);
+      
+      // Auto-remove after 3 seconds
+      setTimeout(() => {
+        if (confirmationEl.parentNode) {
+          confirmationEl.remove();
+        }
+      }, 3000);
+      
+      return confirmationEl;
+    } catch (e) {
+      console.error('Error rendering Legacy Mode verification processed:', e);
+      return null;
+    }
+  }
+  
+  function renderLegacySessionStopped(sessionId) {
+    try {
+      const stoppedEl = document.createElement('div');
+      stoppedEl.className = 'legacy-session-stopped';
+      
+      stoppedEl.innerHTML = `
+        <div class="session-stopped-header">
+          <span class="stopped-icon">🛑</span>
+          <h4>Legacy Mode Session Stopped</h4>
+        </div>
+        <div class="session-stopped-info">
+          Session ${sessionId} has been stopped by user request.
+        </div>
+      `;
+      
+      appendToLegacyContent(stoppedEl);
+      return stoppedEl;
+    } catch (e) {
+      console.error('Error rendering Legacy Mode session stopped:', e);
+      return null;
+    }
+  }
+  
+  // Legacy Mode Utility Functions
+  function getStatusIcon(status) {
+    switch (status) {
+      case 'pending': return '⏳';
+      case 'in_progress': return '🔄';
+      case 'done': return '✅';
+      case 'failed': return '❌';
+      default: return '❓';
+    }
+  }
+  
+  function generateSessionId() {
+    return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
+  
+  function generateTodoId() {
+    return 'todo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  }
+  
+  function appendToLegacyContent(element) {
+    try {
+      if (chatMessagesContainer && element) {
+        chatMessagesContainer.appendChild(element);
+        chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+      }
+    } catch (e) {
+      console.error('Error appending to Legacy Mode content:', e);
+    }
+  }
+  
+  // Legacy Mode Action Handlers
+  function retryLastAction() {
+    try {
+      if (vscode && legacyModeState.currentSession) {
+        vscode.postMessage({
+          command: 'retryLastAction',
+          sessionId: legacyModeState.currentSession.id
+        });
+      }
+    } catch (e) {
+      console.error('Error retrying last action:', e);
+    }
+  }
+  
+  function skipCurrentTodo() {
+    try {
+      if (vscode && legacyModeState.currentSession) {
+        vscode.postMessage({
+          command: 'skipCurrentTodo',
+          sessionId: legacyModeState.currentSession.id
+        });
+      }
+    } catch (e) {
+      console.error('Error skipping current TODO:', e);
+    }
+  }
+  
+  function pauseLegacySession() {
+    try {
+      if (vscode && legacyModeState.currentSession) {
+        vscode.postMessage({
+          command: 'pauseLegacySession',
+          sessionId: legacyModeState.currentSession.id
+        });
+      }
+    } catch (e) {
+      console.error('Error pausing Legacy Mode session:', e);
+    }
+  }
+  
+  function resumeLegacySession() {
+    try {
+      if (vscode && legacyModeState.currentSession) {
+        vscode.postMessage({
+          command: 'resumeLegacySession',
+          sessionId: legacyModeState.currentSession.id
+        });
+      }
+    } catch (e) {
+      console.error('Error resuming Legacy Mode session:', e);
+    }
+  }
+  
+  // Legacy Mode Message Handlers
+  function handleLegacyModeMessage(data) {
+    try {
+      switch (data.type) {
+        case 'sessionCreated':
+          createLegacySession(data.session);
+          break;
+        case 'sessionUpdated':
+          updateLegacySession(data.updates);
+          break;
+        case 'todoAdded':
+          addLegacyTodo(data.todo);
+          break;
+        case 'todoUpdated':
+          updateLegacyTodo(data.todoId, data.updates);
+          break;
+        case 'todoCompleted':
+          completeLegacyTodo(data.todoId, data.result);
+          break;
+        case 'verificationRequested':
+          requestTodoVerification(data.todoId, data.result);
+          break;
+        case 'toolCallExecuted':
+          renderLegacyToolCall(data.toolCall);
+          break;
+        case 'terminalCommandExecuted':
+          renderLegacyTerminalCommand(data.command);
+          break;
+        case 'errorOccurred':
+          renderLegacyError(data.error);
+          break;
+        case 'sessionStopped':
+          stopLegacySession(data.sessionId);
+          break;
+        default:
+          console.warn('Unknown Legacy Mode message type:', data.type);
+      }
+    } catch (e) {
+      console.error('Error handling Legacy Mode message:', e);
+    }
+  }
+  
+  // Performance Optimization Functions
+  
+  /**
+   * Show loading state with optional message
+   */
+  function showLoadingState(requestId, message = "Processing...") {
+    const loadingEl = document.createElement('div');
+    loadingEl.className = 'loading-state';
+    loadingEl.id = `loading-${requestId}`;
+    loadingEl.innerHTML = `
+      <div class="loading-spinner"></div>
+      <span class="loading-message">${message}</span>
+    `;
+    
+    loadingStates.set(requestId, loadingEl);
+    
+    // Add to chat container
+    if (chatMessagesContainer) {
+      chatMessagesContainer.appendChild(loadingEl);
+      chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+    }
+  }
+
+  /**
+   * Hide loading state
+   */
+  function hideLoadingState(requestId) {
+    const loadingEl = loadingStates.get(requestId);
+    if (loadingEl && loadingEl.parentNode) {
+      loadingEl.parentNode.removeChild(loadingEl);
+    }
+    loadingStates.delete(requestId);
+  }
+
+  /**
+   * Queue UI update for batching
+   */
+  function queueUIUpdate(updateData) {
+    uiUpdateQueue.push({
+      ...updateData,
+      timestamp: Date.now()
+    });
+    
+    // Schedule batch processing if not already scheduled
+    if (!uiUpdateTimer) {
+      uiUpdateTimer = setTimeout(() => {
+        processBatchedUIUpdates();
+      }, 50); // 50ms batching window
+    }
+  }
+
+  /**
+   * Process batched UI updates
+   */
+  function processBatchedUIUpdates() {
+    if (uiUpdateQueue.length === 0) {
+      uiUpdateTimer = null;
+      return;
+    }
+    
+    const startTime = performance.now();
+    const batch = uiUpdateQueue.splice(0, 10); // Process up to 10 updates at once
+    
+    // Group updates by type for efficiency
+    const updatesByType = {};
+    batch.forEach(update => {
+      if (!updatesByType[update.type]) {
+        updatesByType[update.type] = [];
+      }
+      updatesByType[update.type].push(update);
+    });
+    
+    // Process each type of update
+    Object.keys(updatesByType).forEach(type => {
+      const updates = updatesByType[type];
+      
+      switch (type) {
+        case 'loading_state':
+          updates.forEach(update => {
+            if (update.show) {
+              showLoadingState(update.requestId, update.message);
+            } else {
+              hideLoadingState(update.requestId);
+            }
+          });
+          break;
+          
+        case 'session_cleanup':
+          updates.forEach(update => {
+            console.log(`Session cleanup: ${update.cleanedCount} sessions cleaned in ${update.duration}ms`);
+          });
+          break;
+          
+        case 'performance_update':
+          updates.forEach(update => {
+            updatePerformanceDisplay(update.metrics);
+          });
+          break;
+          
+        default:
+          console.log(`Unhandled UI update type: ${type}`, updates);
+      }
+    });
+    
+    // Update performance metrics
+    const duration = performance.now() - startTime;
+    updateUIPerformanceMetrics(duration, batch.length);
+    
+    // Schedule next batch if more updates pending
+    if (uiUpdateQueue.length > 0) {
+      uiUpdateTimer = setTimeout(() => {
+        processBatchedUIUpdates();
+      }, 50);
+    } else {
+      uiUpdateTimer = null;
+    }
+  }
+
+  /**
+   * Update UI performance metrics
+   */
+  function updateUIPerformanceMetrics(duration, batchSize) {
+    performanceMetrics.uiUpdatesProcessed += batchSize;
+    
+    const currentAvg = performanceMetrics.averageUpdateTime;
+    const count = performanceMetrics.uiUpdatesProcessed;
+    
+    if (count === batchSize) {
+      performanceMetrics.averageUpdateTime = duration;
+    } else {
+      performanceMetrics.averageUpdateTime = 
+        (currentAvg * (count - batchSize) + duration) / count;
+    }
+    
+    performanceMetrics.lastUpdateTime = Date.now();
+  }
+
+  /**
+   * Update performance display (if performance panel exists)
+   */
+  function updatePerformanceDisplay(metrics) {
+    const perfPanel = document.getElementById('performance-panel');
+    if (!perfPanel) return;
+    
+    perfPanel.innerHTML = `
+      <div class="performance-metrics">
+        <h4>Performance Metrics</h4>
+        <div class="metric">
+          <span class="metric-label">UI Updates:</span>
+          <span class="metric-value">${performanceMetrics.uiUpdatesProcessed}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Avg Update Time:</span>
+          <span class="metric-value">${performanceMetrics.averageUpdateTime.toFixed(2)}ms</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Memory Usage:</span>
+          <span class="metric-value">${metrics.memoryUsage ? Math.round(metrics.memoryUsage.heapUsed / 1024 / 1024) : 'N/A'}MB</span>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Handle batched updates from extension
+   */
+  function handleBatchedUpdates(data) {
+    const { updates, batchSize, timestamp } = data;
+    
+    Object.keys(updates).forEach(type => {
+      const typeUpdates = updates[type];
+      typeUpdates.forEach(update => {
+        queueUIUpdate({ ...update, type });
+      });
+    });
+    
+    console.log(`Received ${batchSize} batched updates from extension`);
+  }
+
+  /**
+   * Debounced scroll to bottom function
+   */
+  const debouncedScrollToBottom = debounce(() => {
+    if (chatMessagesContainer) {
+      chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+    }
+  }, 100);
+
+  /**
+   * Debounce utility function
+   */
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  // Export Legacy Mode functions for global access
+  window.legacyMode = {
+    createSession: createLegacySession,
+    updateSession: updateLegacySession,
+    stopSession: stopLegacySession,
+    addTodo: addLegacyTodo,
+    updateTodo: updateLegacyTodo,
+    completeTodo: completeLegacyTodo,
+    verifyTodo: verifyTodo,
+    renderToolCall: renderLegacyToolCall,
+    renderTerminalCommand: renderLegacyTerminalCommand,
+    renderError: renderLegacyError,
+    handleMessage: handleLegacyModeMessage,
+    getState: () => legacyModeState
+  };
+
+  // Export performance functions for global access
+  window.performance = {
+    showLoading: showLoadingState,
+    hideLoading: hideLoadingState,
+    queueUpdate: queueUIUpdate,
+    getMetrics: () => performanceMetrics,
+    handleBatchedUpdates: handleBatchedUpdates
+  };

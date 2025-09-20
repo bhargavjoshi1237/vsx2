@@ -15,6 +15,11 @@
       {
         "command": "vsx.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "vsx.legacyModeSettings",
+        "title": "Legacy Mode Settings",
+        "category": "VSX"
       }
     ],
     "viewsContainers": {
@@ -50,6 +55,97 @@
           "default": "",
           "description": "API key for NVIDIA AI models",
           "scope": "application"
+        },
+        "vsx.legacyMode.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Legacy Mode autonomous execution",
+          "scope": "application"
+        },
+        "vsx.legacyMode.timeouts.taskExecution": {
+          "type": "number",
+          "default": 300000,
+          "description": "Timeout for individual task execution in milliseconds (default: 5 minutes)",
+          "scope": "application"
+        },
+        "vsx.legacyMode.timeouts.userVerification": {
+          "type": "number",
+          "default": 60000,
+          "description": "Timeout for user verification prompts in milliseconds (default: 1 minute)",
+          "scope": "application"
+        },
+        "vsx.legacyMode.timeouts.sessionTotal": {
+          "type": "number",
+          "default": 1800000,
+          "description": "Maximum total session duration in milliseconds (default: 30 minutes)",
+          "scope": "application"
+        },
+        "vsx.legacyMode.autoApproval.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable automatic approval of simple tasks",
+          "scope": "application"
+        },
+        "vsx.legacyMode.autoApproval.fileOperations": {
+          "type": "boolean",
+          "default": false,
+          "description": "Auto-approve file read/write operations",
+          "scope": "application"
+        },
+        "vsx.legacyMode.autoApproval.terminalCommands": {
+          "type": "boolean",
+          "default": false,
+          "description": "Auto-approve safe terminal commands",
+          "scope": "application"
+        },
+        "vsx.legacyMode.security.allowedCommands": {
+          "type": "array",
+          "default": ["npm", "node", "git", "ls", "dir", "cat", "type", "echo"],
+          "description": "List of allowed terminal commands for execution",
+          "scope": "application"
+        },
+        "vsx.legacyMode.security.restrictToWorkspace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Restrict file operations to workspace directory only",
+          "scope": "application"
+        },
+        "vsx.legacyMode.security.maxFileSize": {
+          "type": "number",
+          "default": 10485760,
+          "description": "Maximum file size for operations in bytes (default: 10MB)",
+          "scope": "application"
+        },
+        "vsx.legacyMode.security.blockedPaths": {
+          "type": "array",
+          "default": [".git", "node_modules", ".env", "*.key", "*.pem"],
+          "description": "File paths and patterns to block from access",
+          "scope": "application"
+        },
+        "vsx.legacyMode.ui.showProgressBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show progress bar during task execution",
+          "scope": "application"
+        },
+        "vsx.legacyMode.ui.showDetailedLogs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show detailed execution logs in the UI",
+          "scope": "application"
+        },
+        "vsx.legacyMode.ui.notificationLevel": {
+          "type": "string",
+          "enum": ["none", "errors", "warnings", "all"],
+          "default": "warnings",
+          "description": "Level of notifications to show",
+          "scope": "application"
+        },
+        "vsx.legacyMode.ui.autoScroll": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scroll to show latest activity",
+          "scope": "application"
         }
       }
     }
@@ -57,7 +153,16 @@
   "scripts": {
     "lint": "eslint .",
     "pretest": "npm run lint",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:integration": "node test/runLegacyModeIntegrationTests.js",
+    "test:integration:check": "node test/runLegacyModeIntegrationTests.js check",
+    "test:integration:e2e": "node test/runLegacyModeIntegrationTests.js suite e2e",
+    "test:integration:webview": "node test/runLegacyModeIntegrationTests.js suite webview",
+    "test:integration:llm": "node test/runLegacyModeIntegrationTests.js suite llm",
+    "test:integration:error": "node test/runLegacyModeIntegrationTests.js suite error",
+    "test:integration:performance": "node test/runLegacyModeIntegrationTests.js suite performance",
+    "test:integration:report": "node test/runLegacyModeIntegrationTests.js report",
+    "test:all": "npm run test && npm run test:integration"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -68,6 +173,8 @@
     "@vscode/test-electron": "^2.5.2",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.34.0",
+    "jest": "^29.7.0",
+    "jest-html-reporters": "^3.1.7",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "vite": "^7.1.4"
@@ -77,9 +184,10 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.542.0",
+    "node-fetch": "^2.6.7",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "tailwind-merge": "^3.3.1",
-    "node-fetch": "^2.6.7"
+    "uuid": "^13.0.0"
   }
 }

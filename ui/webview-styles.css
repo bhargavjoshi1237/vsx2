@@ -346,3 +346,502 @@ body {
   font-size: 11px;
   border: 1px solid rgba(255, 255, 255, 0.03);
 }
+/* Legacy Mode Specific Styles */
+
+.legacy-mode-content {
+  margin: 1rem 0;
+}
+
+.legacy-session-item {
+  background: linear-gradient(135deg, #1e1e1e 0%, #2a2a2a 100%);
+  border: 1px solid #4a5568;
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  animation: slideInFromLeft 0.4s ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.legacy-session-item:hover {
+  border-color: #6366f1;
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.2);
+  transition: all 0.3s ease;
+}
+
+.legacy-todo-item {
+  background: #2a2a2a;
+  border: 1px solid #4a5568;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.legacy-todo-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: linear-gradient(to bottom, #10b981, #059669);
+}
+
+.legacy-todo-item:hover {
+  background: #374151;
+  border-color: #6b7280;
+  transform: translateY(-1px);
+}
+
+.legacy-tool-item {
+  background: #1f2937;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  animation: fadeInScale 0.3s ease-out;
+}
+
+.legacy-terminal-item {
+  background: #0f172a;
+  border: 1px solid #22c55e;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  font-family: 'Courier New', monospace;
+  animation: typewriter 0.5s ease-out;
+}
+
+.legacy-error-item {
+  background: #7f1d1d;
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  animation: shake 0.5s ease-in-out;
+}
+
+.legacy-confirmation-request {
+  background: linear-gradient(135deg, #92400e 0%, #b45309 100%);
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  animation: pulse 2s infinite;
+}
+
+.legacy-progress-item {
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.progress-bar {
+  background: #374151;
+  border-radius: 9999px;
+  height: 8px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-fill {
+  background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  animation: shimmer 2s infinite;
+}
+
+/* Legacy Mode Dialogs */
+.legacy-confirmation-dialog,
+.legacy-feedback-dialog {
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.legacy-confirmation-dialog > div,
+.legacy-feedback-dialog > div {
+  animation: scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+}
+
+/* Session Controls */
+.legacy-session-controls {
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.session-control-btn {
+  transition: all 0.2s ease;
+  font-size: 0.75rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.session-control-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.session-control-btn:active {
+  transform: translateY(0);
+}
+
+/* Status Icons */
+.todo-status {
+  font-size: 1.25rem;
+  width: 24px;
+  text-align: center;
+  display: inline-block;
+}
+
+/* Code Blocks in Legacy Mode */
+.legacy-tool-item pre,
+.legacy-terminal-item pre {
+  background: #111827;
+  border-radius: 6px;
+  padding: 0.75rem;
+  overflow-x: auto;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  border: 1px solid #374151;
+}
+
+.legacy-tool-item code,
+.legacy-terminal-item code {
+  font-family: 'Courier New', 'Monaco', monospace;
+  color: #e5e7eb;
+}
+
+/* Notification Styles */
+.legacy-session-notification,
+.legacy-confirmation-processed,
+.legacy-session-paused,
+.legacy-session-resumed,
+.legacy-session-stopped,
+.legacy-session-status {
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  animation: slideInFromRight 0.4s ease-out;
+}
+
+/* Animations */
+@keyframes slideInFromLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes typewriter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shake {
+  0%, 100% { 
+    transform: translateX(0); 
+  }
+  10%, 30%, 50%, 70%, 90% { 
+    transform: translateX(-2px); 
+  }
+  20%, 40%, 60%, 80% { 
+    transform: translateX(2px); 
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+@keyframes fadeIn {
+  from { 
+    opacity: 0; 
+  }
+  to { 
+    opacity: 1; 
+  }
+}
+
+@keyframes scaleIn {
+  from { 
+    opacity: 0;
+    transform: scale(0.9) translateY(-10px);
+  }
+  to { 
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Responsive Design for Legacy Mode */
+@media (max-width: 640px) {
+  .legacy-session-item,
+  .legacy-todo-item,
+  .legacy-tool-item,
+  .legacy-terminal-item {
+    margin-left: 0.5rem;
+    margin-right: 0.5rem;
+    padding: 0.75rem;
+  }
+  
+  .session-control-btn {
+    font-size: 0.625rem;
+    padding: 0.25rem 0.5rem;
+  }
+  
+  .legacy-confirmation-dialog > div,
+  .legacy-feedback-dialog > div {
+    margin: 1rem;
+    max-width: calc(100% - 2rem);
+  }
+}
+
+/* Dark Mode Enhancements */
+.legacy-mode-content {
+  color: #e5e7eb;
+}
+
+.legacy-session-item h2,
+.legacy-session-item h3,
+.legacy-todo-item h4 {
+  color: #f3f4f6;
+}
+
+.legacy-tool-item .tool-name {
+  color: #60a5fa;
+  font-weight: 500;
+}
+
+.legacy-terminal-item .terminal-command {
+  color: #34d399;
+}
+
+.legacy-error-item .error-message {
+  color: #fca5a5;
+}
+
+/* Hover Effects */
+.legacy-todo-item:hover .todo-status {
+  transform: scale(1.1);
+  transition: transform 0.2s ease;
+}
+
+.legacy-tool-item:hover {
+  border-color: #60a5fa;
+  box-shadow: 0 4px 12px rgba(96, 165, 250, 0.1);
+}
+
+.legacy-terminal-item:hover {
+  border-color: #34d399;
+  box-shadow: 0 4px 12px rgba(52, 211, 153, 0.1);
+}
+
+/* Focus States for Accessibility */
+.session-control-btn:focus,
+.legacy-confirmation-request button:focus,
+.legacy-feedback-dialog button:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Loading States */
+.legacy-session-item.loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.legacy-session-item.loading::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  animation: shimmer 1.5s infinite;
+}
+
+/* Success States */
+.legacy-todo-item.completed {
+  background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+  border-color: #10b981;
+}
+
+.legacy-todo-item.completed .todo-status {
+  color: #34d399;
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+}
+
+/* Error States */
+.legacy-todo-item.failed {
+  background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+  border-color: #dc2626;
+}
+
+.legacy-todo-item.failed .todo-status {
+  color: #f87171;
+  text-shadow: 0 0 8px rgba(248, 113, 113, 0.5);
+}
+/*
+ Performance Optimization Styles */
+.loading-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #2d2d30;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  margin: 8px 0;
+  color: #cccccc;
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #3e3e42;
+  border-top: 2px solid #007acc;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-message {
+  font-size: 14px;
+  color: #cccccc;
+}
+
+.performance-panel {
+  background: #1e1e1e;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+  padding: 12px;
+  margin: 8px 0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.performance-metrics h4 {
+  margin: 0 0 8px 0;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid #3e3e42;
+}
+
+.metric:last-child {
+  border-bottom: none;
+}
+
+.metric-label {
+  color: #cccccc;
+  font-size: 12px;
+}
+
+.metric-value {
+  color: #007acc;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Optimized animations for better performance */
+.legacy-session-item,
+.legacy-todo-item,
+.legacy-tool-item {
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* Reduce animation complexity on slower devices */
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation: none;
+  }
+  
+  .legacy-session-item,
+  .legacy-todo-item,
+  .legacy-tool-item {
+    transition: none;
+  }
+}

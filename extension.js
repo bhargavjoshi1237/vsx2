@@ -21,6 +21,20 @@ function activate(context) {
     }
   });
   context.subscriptions.push(setupApiCommand);
+
+  const legacyModeSettingsCommand = vscode.commands.registerCommand('vsx.legacyModeSettings', async () => {
+    try {
+      if (provider && typeof provider.openLegacyModeSettings === 'function') {
+        await provider.openLegacyModeSettings();
+      } else {
+        vscode.window.showErrorMessage('Legacy Mode settings not available');
+      }
+    } catch (e) {
+      console.error('Error running legacyModeSettings command', e);
+      vscode.window.showErrorMessage('Error opening Legacy Mode settings: ' + String(e));
+    }
+  });
+  context.subscriptions.push(legacyModeSettingsCommand);
   const disposable = vscode.commands.registerCommand(
     "vsx.helloWorld",
     function () {

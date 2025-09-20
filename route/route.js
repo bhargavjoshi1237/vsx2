@@ -1,12 +1,15 @@
 const gemini = require("./geminiclient");
 const modes = require("../modes");
+const { parseLegacyResponse } = require("./legacyParser");
+const { contextManager } = require("../legacy/contextManager");
 
 function createRouter() {
 
-  function buildWrappedPrompt(userPrompt, modeId) {
+  function buildWrappedPrompt(userPrompt, modeId, context = {}) {
     let top = '';
     let bottom = '';
     let fileHeader = '';
+    
     try {
       if (modeId && typeof modes.getModeById === 'function') {
         const m = modes.getModeById(modeId);
@@ -25,6 +28,14 @@ function createRouter() {
         }
       }
     } catch {
+    }
+
+    // Handle Legacy Mode context injection
+    if (modeId === 'legacy' && context.sessionId) {
+      const legacyContext = buildLegacyModeContext(context.sessionId, userPrompt);
+      if (legacyContext) {
+        userPrompt = legacyContext;
+      }
     }
 
     // Support passing files as a special marker: if userPrompt is an array and the
@@ -51,6 +62,24 @@ function createRouter() {
     }
 
     return `${top}\n\n${userPrompt}\n\n${bottom}`;
+  }
+
+  /**
+   * Build Legacy Mode context with session information
+   * @param {string} sessionId - The session ID
+   * @param {string} userPrompt - The user's prompt
+   * @returns {string|null} Enhanced prompt with context or null if session not found
+   */
+  function buildLegacyModeContext(sessionId, userPrompt) {
+    try {
+      const contextPrompt = contextManager.buildContextPrompt(sessionId);
+      if (contextPrompt) {
+        return `${contextPrompt}\n\n## Current Request\n${userPrompt}`;
+      }
+    } catch (error) {
+      console.warn('Failed to build Legacy Mode context:', error.message);
+    }
+    return null;
   }
 
   function getApiKey() {
@@ -93,27 +122,28 @@ function createRouter() {
     };
   }
 
-  async function sendPrompt(modelId, prompt, modeId) {
+  async function sendPrompt(modelId, prompt, modeId, context = {}) {
     try {
       const models = await getModels();
       const byId = models.byId || {};
       const modelMeta = modelId && byId[modelId] ? byId[modelId] : null;
       const looksLikeNvidia = typeof modelId === 'string' && modelId.includes('/');
       if ((modelMeta && modelMeta.provider === 'nvidia') || (!modelMeta && looksLikeNvidia)) {
-        return await sendPromptNvidia(modelId, prompt, modeId);
+        return await sendPromptNvidia(modelId, prompt, modeId, context);
       }
     } catch {
     }
 
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("Gemini API key not configured");
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Gemini API key not configured");
 
-  // build wrapped prompt and log it
-  const prepared = buildWrappedPrompt(prompt, modeId);
-  console.log('Prepared prompt for Gemini:', prepared);
+    // build wrapped prompt and log it
+    const prepared = buildWrappedPrompt(prompt, modeId, context);
+    console.log('Prepared prompt for Gemini:', prepared);
 
-  const parts = Array.isArray(prepared) ? prepared : [prepared];
-  const resp = await gemini.callGemini(apiKey, modelId || "", parts);
+    const parts = Array.isArray(prepared) ? prepared : [prepared];
+    const resp = await gemini.callGemini(apiKey, modelId || "", parts);
+    
     function extractTextFromResponse(r) {
       try {
         if (!r) return "";
@@ -147,8 +177,16 @@ function createRouter() {
         return JSON.stringify(r);
       }
     }
+    
     const text = extractTextFromResponse(resp);
-    return { raw: resp, text };
+    const result = { raw: resp, text };
+    
+    // Process Legacy Mode response if applicable
+    if (modeId === 'legacy') {
+      return processLegacyModeResponse(result, context);
+    }
+    
+    return result;
   }
   const nvidia = require("./nvidiaclient");
   function getNvidiaApiKey() {
@@ -161,11 +199,12 @@ function createRouter() {
     }
   }
 
-  async function sendPromptNvidia(modelId, prompt, modeId) {
+  async function sendPromptNvidia(modelId, prompt, modeId, context = {}) {
     const apiKey = getNvidiaApiKey();
     if (!apiKey) throw new Error("NVIDIA API key not configured");
+    
     // build wrapped prompt and log it
-    const prepared = buildWrappedPrompt(prompt, modeId);
+    const prepared = buildWrappedPrompt(prompt, modeId, context);
     console.log('Prepared prompt for NVIDIA:', prepared);
 
     const parts = Array.isArray(prepared) ? prepared : [prepared];
@@ -200,24 +239,186 @@ function createRouter() {
     }
 
     const text = extractTextFromNvidia(resp);
-    return { raw: resp, text };
+    const result = { raw: resp, text };
+    
+    // Process Legacy Mode response if applicable
+    if (modeId === 'legacy') {
+      return processLegacyModeResponse(result, context);
+    }
+    
+    return result;
+  }
+
+  /**
+   * Process Legacy Mode response with specialized parsing and error handling
+   * @param {Object} result - The raw LLM response result
+   * @param {Object} context - Request context including sessionId
+   * @returns {Object} Processed Legacy Mode response
+   */
+  function processLegacyModeResponse(result, context = {}) {
+    try {
+      // Parse the Legacy Mode JSON response
+      const parsedLegacy = parseLegacyResponse(result.text);
+      
+      // Log successful parsing
+      console.log('Legacy Mode response parsed successfully:', {
+        phase: parsedLegacy.phase,
+        todoCount: parsedLegacy.todos ? parsedLegacy.todos.length : 0,
+        hasToolCall: !!parsedLegacy.toolCall,
+        hasVerification: !!parsedLegacy.verification,
+        complete: parsedLegacy.complete
+      });
+      
+      // Update session context if sessionId provided
+      if (context.sessionId && parsedLegacy.phase) {
+        try {
+          contextManager.updateSession(context.sessionId, {
+            phase: parsedLegacy.phase,
+            lastResponse: parsedLegacy
+          });
+        } catch (contextError) {
+          console.warn('Failed to update session context:', contextError.message);
+        }
+      }
+      
+      // Return enhanced result with Legacy Mode data
+      return {
+        ...result,
+        legacyData: parsedLegacy,
+        phase: parsedLegacy.phase,
+        todos: parsedLegacy.todos,
+        toolCall: parsedLegacy.toolCall,
+        verification: parsedLegacy.verification,
+        complete: parsedLegacy.complete,
+        sessionId: context.sessionId,
+        parseSuccess: true
+      };
+      
+    } catch (error) {
+      console.error('Legacy Mode response processing failed:', error);
+      
+      // Return error response with fallback data
+      return {
+        ...result,
+        legacyData: {
+          type: 'legacy_response',
+          phase: 'execution',
+          message: `Response processing error: ${error.message}`,
+          complete: false,
+          todos: [],
+          toolCall: null,
+          verification: null,
+          _processingError: error.message
+        },
+        parseSuccess: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Enhanced runMode function with Legacy Mode support
+   * @param {string} modeId - The mode ID to run
+   * @param {Object} ctx - Execution context
+   * @returns {Promise<Object>} Mode execution result
+   */
+  async function runModeEnhanced(modeId, ctx) {
+    const m = modes.getModeById(modeId);
+    if (!m) throw new Error("Unknown mode: " + modeId);
+    
+    // For Legacy Mode, enhance context with router reference
+    if (modeId === 'legacy') {
+      const enhancedCtx = {
+        ...ctx,
+        router: {
+          sendPrompt: (modelId, prompt, context) => sendPrompt(modelId, prompt, modeId, context),
+          getModels,
+          contextManager
+        }
+      };
+      return await m.execute(enhancedCtx);
+    }
+    
+    return await m.execute(ctx);
+  }
+
+  /**
+   * Create or get Legacy Mode session
+   * @param {string} task - The task description
+   * @param {string} modelId - The model ID
+   * @param {string} requestId - The request ID
+   * @returns {Object} Session information
+   */
+  function createLegacySession(task, modelId, requestId) {
+    try {
+      const session = contextManager.createSession(task, modelId, requestId);
+      return {
+        success: true,
+        sessionId: session.id,
+        session: {
+          id: session.id,
+          originalTask: session.originalTask,
+          phase: session.phase,
+          startTime: session.startTime
+        }
+      };
+    } catch (error) {
+      console.error('Failed to create Legacy Mode session:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Get Legacy Mode session information
+   * @param {string} sessionId - The session ID
+   * @returns {Object} Session information or error
+   */
+  function getLegacySession(sessionId) {
+    try {
+      const context = contextManager.getSessionContext(sessionId);
+      if (!context) {
+        return {
+          success: false,
+          error: 'Session not found'
+        };
+      }
+      
+      return {
+        success: true,
+        sessionId: context.sessionId,
+        context
+      };
+    } catch (error) {
+      console.error('Failed to get Legacy Mode session:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
 
   return {
     getModels,
     sendPrompt,
     sendPromptNvidia,
+    buildWrappedPrompt,
+    buildLegacyModeContext,
+    processLegacyModeResponse,
 
     listModes: modes.listModes,
     getModeById: modes.getModeById,
-    runMode: async function (modeId, ctx) {
-      const m = modes.getModeById(modeId);
-      if (!m) throw new Error("Unknown mode: " + modeId);
-      return await m.execute(ctx);
-    },
+    runMode: runModeEnhanced,
     runProcedure: async function (name) {
       return { error: "no-procedure-implemented", name };
     },
+
+    // Legacy Mode specific functions
+    createLegacySession,
+    getLegacySession,
+    contextManager
   };
 }
 

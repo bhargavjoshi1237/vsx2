@@ -1,0 +1,195 @@
+<!-- Legacy Mode UI Templates -->
+
+<!-- Legacy Mode Session Display Template -->
+<template id="legacy-session-template">
+  <div class="legacy-session-item">
+    <div class="session-header">
+      <h2 class="session-title">Legacy Mode Session</h2>
+      <span class="session-id">{{sessionId}}</span>
+      <button class="session-stop-btn" onclick="stopLegacySession('{{sessionId}}')">Stop</button>
+    </div>
+    <div class="session-info">
+      <span class="session-time">Started: {{startTime}}</span>
+      <span class="session-phase">Phase: <span class="phase-badge phase-{{phase}}">{{phase}}</span></span>
+    </div>
+    <div class="session-task">
+      <strong>Task:</strong> {{originalTask}}
+    </div>
+    <div class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: {{progressPercent}}%"></div>
+      </div>
+      <span class="progress-text">{{completedTodos}}/{{totalTodos}} TODOs completed</span>
+    </div>
+  </div>
+</template>
+
+<!-- TODO Display Template -->
+<template id="legacy-todo-template">
+  <div class="legacy-todo-item todo-{{status}}">
+    <div class="todo-header">
+      <span class="todo-status-icon">{{statusIcon}}</span>
+      <h4 class="todo-description">{{description}}</h4>
+      <span class="todo-id">#{{id}}</span>
+    </div>
+    <div class="todo-expected">
+      <strong>Expected Result:</strong> {{expectedResult}}
+    </div>
+    {{#if result}}
+    <div class="todo-result">
+      <strong>Actual Result:</strong> {{result}}
+    </div>
+    {{/if}}
+    <div class="todo-timestamps">
+      <span>Created: {{createdAt}}</span>
+      {{#if completedAt}}
+      <span>Completed: {{completedAt}}</span>
+      {{/if}}
+    </div>
+    {{#if needsVerification}}
+    <div class="todo-verification">
+      <p>Does this TODO completion look correct?</p>
+      <div class="verification-buttons">
+        <button class="verify-approve-btn" onclick="verifyTodo('{{id}}', true)">✓ Approve</button>
+        <button class="verify-reject-btn" onclick="verifyTodo('{{id}}', false)">✗ Reject</button>
+      </div>
+      <textarea class="verification-feedback" placeholder="Optional feedback..."></textarea>
+    </div>
+    {{/if}}
+  </div>
+</template>
+
+<!-- Tool Call Display Template -->
+<template id="legacy-tool-template">
+  <div class="legacy-tool-item tool-{{status}}">
+    <div class="tool-header">
+      <span class="tool-icon">🔧</span>
+      <span class="tool-name">{{toolName}}</span>
+      <span class="tool-timestamp">{{timestamp}}</span>
+    </div>
+    <div class="tool-details">
+      <div class="tool-input">
+        <strong>Input:</strong>
+        <pre class="tool-params">{{params}}</pre>
+      </div>
+      {{#if result}}
+      <div class="tool-output">
+        <strong>Output:</strong>
+        <pre class="tool-result">{{result}}</pre>
+      </div>
+      {{/if}}
+      {{#if error}}
+      <div class="tool-error">
+        <strong>Error:</strong>
+        <pre class="error-message">{{error}}</pre>
+      </div>
+      {{/if}}
+    </div>
+    {{#if success}}
+    <div class="tool-status success">✓ Success</div>
+    {{else}}
+    <div class="tool-status failed">✗ Failed</div>
+    {{/if}}
+  </div>
+</template>
+
+<!-- Terminal Command Template -->
+<template id="legacy-terminal-template">
+  <div class="legacy-terminal-item">
+    <div class="terminal-header">
+      <span class="terminal-icon">💻</span>
+      <span class="terminal-label">Terminal Command</span>
+      <span class="terminal-timestamp">{{timestamp}}</span>
+    </div>
+    <div class="terminal-content">
+      <div class="terminal-command">
+        <span class="command-prompt">$</span>
+        <code>{{command}}</code>
+      </div>
+      {{#if output}}
+      <div class="terminal-output">
+        <pre>{{output}}</pre>
+      </div>
+      {{/if}}
+      {{#if error}}
+      <div class="terminal-error">
+        <pre>{{error}}</pre>
+      </div>
+      {{/if}}
+    </div>
+    <div class="terminal-status">
+      {{#if success}}
+      <span class="status-success">✓ Exit code: {{exitCode}}</span>
+      {{else}}
+      <span class="status-error">✗ Exit code: {{exitCode}}</span>
+      {{/if}}
+    </div>
+  </div>
+</template>
+
+<!-- Legacy Mode Error Template -->
+<template id="legacy-error-template">
+  <div class="legacy-error-item">
+    <div class="error-header">
+      <span class="error-icon">⚠️</span>
+      <h4 class="error-title">{{errorType}} Error</h4>
+    </div>
+    <div class="error-message">{{message}}</div>
+    {{#if context}}
+    <div class="error-context">
+      <strong>Context:</strong> {{context}}
+    </div>
+    {{/if}}
+    {{#if suggestions}}
+    <div class="error-suggestions">
+      <strong>Suggested Actions:</strong>
+      <ul>
+        {{#each suggestions}}
+        <li>{{this}}</li>
+        {{/each}}
+      </ul>
+    </div>
+    {{/if}}
+    <div class="error-actions">
+      <button class="retry-btn" onclick="retryLastAction()">Retry</button>
+      <button class="skip-btn" onclick="skipCurrentTodo()">Skip</button>
+      <button class="stop-btn" onclick="stopLegacySession()">Stop Session</button>
+    </div>
+  </div>
+</template>
+
+<!-- Legacy Mode Summary Template -->
+<template id="legacy-summary-template">
+  <div class="legacy-summary-item">
+    <div class="summary-header">
+      <span class="summary-icon">📋</span>
+      <h3>Legacy Mode Session Complete</h3>
+    </div>
+    <div class="summary-stats">
+      <div class="stat-item">
+        <span class="stat-label">Total TODOs:</span>
+        <span class="stat-value">{{totalTodos}}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Completed:</span>
+        <span class="stat-value success">{{completedTodos}}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Failed:</span>
+        <span class="stat-value error">{{failedTodos}}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Duration:</span>
+        <span class="stat-value">{{duration}}</span>
+      </div>
+    </div>
+    <div class="summary-task">
+      <strong>Original Task:</strong> {{originalTask}}
+    </div>
+    {{#if completionMessage}}
+    <div class="summary-completion">
+      <strong>Completion Status:</strong> {{completionMessage}}
+    </div>
+    {{/if}}
+  </div>
+</template>
