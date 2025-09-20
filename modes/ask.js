@@ -1,47 +1,58 @@
-// Ask mode: simple 1:1 conversation mapping. Exports an object with an execute function
-// that receives { router, modelId, prompt, requestId } and returns { text, raw }.
+const id = "ask";
+const name = "Ask";
 
-const id = 'ask';
-const name = 'Ask';
+const wrappers = {
+  top: "Your name is VSX, You are a helpful assistant. Respond concisely.",
+  bottom: "If the user asks for code, provide only the code block. If you are unsure how to respond, ask for clarification.",
+
+  fileHeader: "The following files are provided for context. Use them as reference when answering.\n\nFile contents are provided as a JSON array with {path, label, content} objects. "
+};
 
 async function execute({ router, modelId, prompt, requestId }) {
-  // provider: 'gemini' | 'nvidia' or null -> router will decide
-  // prompt: string or array
-  // This function performs the basic send/receive.
-  if (!router) throw new Error('Router is required for ask mode');
+  if (!router) throw new Error("Router is required for ask mode");
 
-  // allow procedure hooks: if prompt contains a `do:` token, parse and attempt to run a procedure.
   let procedureResult = null;
   try {
-    if (typeof prompt === 'string' && prompt.includes('do:')) {
-      // syntax: "<message> do:<procedureName>"
+    if (typeof prompt === "string" && prompt.includes("do:")) {
       const parts = prompt.split(/do:\s*/i);
       prompt = parts[0].trim();
       const procName = parts[1] ? parts[1].trim() : null;
       if (procName) {
-        // attempt to call a procedure if exposed by router (optional)
-        if (router && typeof router.runProcedure === 'function') {
+        if (router && typeof router.runProcedure === "function") {
           try {
-            procedureResult = await router.runProcedure(procName, { prompt, modelId, requestId });
+            procedureResult = await router.runProcedure(procName, {
+              prompt,
+              modelId,
+              requestId,
+            });
           } catch (e) {
             procedureResult = { error: String(e) };
           }
         } else {
-          procedureResult = { note: 'No router procedure handler registered' };
+          procedureResult = { note: "No router procedure handler registered" };
         }
       }
     }
   } catch (e) {
-    console.error('Error parsing procedure:', e);
+    console.error("Error parsing procedure:", e);
   }
 
-  // send prompt through the router; router decides provider-specific call
-  const resp = await router.sendPrompt(modelId, prompt);
+  const resp = await router.sendPrompt(modelId, prompt, id);
+  // Ensure text is always a string for the UI. Prefer resp.text, otherwise
+  // stringify resp.raw when available.
+  let text = '';
+  if (resp && typeof resp.text === 'string' && resp.text.length) {
+    text = resp.text;
+  } else if (resp && resp.raw !== undefined) {
+    text = typeof resp.raw === 'string' ? resp.raw : JSON.stringify(resp.raw);
+  } else if (resp && typeof resp === 'string') {
+    text = resp;
+  }
 
-  // include procedure result in returned raw if present
-  const text = resp && resp.text ? resp.text : (resp && resp.raw ? JSON.stringify(resp.raw) : '');
-  const raw = { resp, procedureResult };
-  return { text, raw };
+  // Provide the actual raw provider response as `raw` so parsers can inspect it.
+  const raw = resp && resp.raw !== undefined ? resp.raw : resp;
+
+  return { text, raw, procedureResult };
 }
 
-module.exports = { id, name, execute };
+module.exports = { id, name, execute, wrappers };

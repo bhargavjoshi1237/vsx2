@@ -1,6 +1,30 @@
 <template id="template-chat-user">
-    <div class="message user-message px-3 py-2 m-3 w-max ml-auto bg-blue-900 text-white rounded-lg">
+    <div class="user-message-wrapper">
+    <div class="message user-message px-3 py-2 mt-3 mr-3 w-max ml-auto bg-blue-900 text-white rounded-lg">
+        <!-- message text (replaced by textarea when editing) -->
         <div class="message-text"></div>
-        <div class="message-meta text-xs text-[#e7e7e7] mt-1"></div>
+
+        <!-- Inline in-place editor: when message element has class `editing`, show textarea instead -->
+        <!-- We don't create an extra wrapper div for the editor — textarea sits where the message was. -->
+        <textarea class="inline-edit" placeholder="Edit message..." style="display:none;"></textarea>
+
+        <!-- Inline controls (send and cancel) shown when editing -->
+        <div class="inline-controls h-full items-end" style="display:none;">
+            <button type="button" class="send-edit" title="Send edit" aria-label="Send edit">
+                <!-- paper plane icon -->
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"></path><path d="M22 2l-7 20  -4-9-9-4 20-7z"></path></svg>
+            </button>
+            <button type="button" class="cancel-edit" title="Cancel" aria-label="Cancel edit">
+                <!-- X icon -->
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        </div>
+        <div class="message-meta text-xs text-[#e7e7e7] mt-1 flex items-center gap-2">
+            <span class="meta-text"></span>
+        </div>
+    </div>
+
+    <!-- File chips shown outside the message bubble, just below it -->
+    <div class="message user-message-files ml-auto mr-3 mt-1"></div>
     </div>
 </template>

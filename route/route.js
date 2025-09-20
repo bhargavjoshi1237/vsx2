@@ -2,6 +2,57 @@ const gemini = require("./geminiclient");
 const modes = require("../modes");
 
 function createRouter() {
+
+  function buildWrappedPrompt(userPrompt, modeId) {
+    let top = '';
+    let bottom = '';
+    let fileHeader = '';
+    try {
+      if (modeId && typeof modes.getModeById === 'function') {
+        const m = modes.getModeById(modeId);
+        if (m && m.wrappers) {
+          top = m.wrappers.top || '';
+          bottom = m.wrappers.bottom || '';
+          fileHeader = m.wrappers.fileHeader || '';
+        }
+      }
+      if (!top && !bottom && typeof modes.getModeById === 'function') {
+        const askMode = modes.getModeById('ask');
+        if (askMode && askMode.wrappers) {
+          top = askMode.wrappers.top || '';
+          bottom = askMode.wrappers.bottom || '';
+          fileHeader = askMode.wrappers.fileHeader || fileHeader || '';
+        }
+      }
+    } catch {
+    }
+
+    // Support passing files as a special marker: if userPrompt is an array and the
+    // last element has a `__files` property, treat it specially so we can prepend
+    // a file header and JSON-serialize the files for the model.
+    if (Array.isArray(userPrompt)) {
+      let parts = userPrompt.slice();
+      let filesBlock = null;
+      if (parts.length > 0) {
+        const last = parts[parts.length - 1];
+        if (last && typeof last === 'object' && last.__files && Array.isArray(last.files)) {
+          filesBlock = last.files;
+          parts = parts.slice(0, parts.length - 1);
+        }
+      }
+      let main = parts.join('\n\n');
+      if (filesBlock && filesBlock.length) {
+        const headerText = fileHeader ? (String(fileHeader) + '\n\n') : '';
+        // Safely JSON stringify contents; keep indentation minimal for model consumption
+        const filesJson = JSON.stringify(filesBlock);
+        main = main + '\n\n' + headerText + filesJson;
+      }
+      userPrompt = main;
+    }
+
+    return `${top}\n\n${userPrompt}\n\n${bottom}`;
+  }
+
   function getApiKey() {
     try {
       const vscode = require("vscode");
@@ -42,22 +93,27 @@ function createRouter() {
     };
   }
 
-  async function sendPrompt(modelId, prompt) {
+  async function sendPrompt(modelId, prompt, modeId) {
     try {
       const models = await getModels();
       const byId = models.byId || {};
       const modelMeta = modelId && byId[modelId] ? byId[modelId] : null;
       const looksLikeNvidia = typeof modelId === 'string' && modelId.includes('/');
       if ((modelMeta && modelMeta.provider === 'nvidia') || (!modelMeta && looksLikeNvidia)) {
-        return await sendPromptNvidia(modelId, prompt);
+        return await sendPromptNvidia(modelId, prompt, modeId);
       }
     } catch {
     }
 
-    const apiKey = getApiKey();
-    if (!apiKey) throw new Error("Gemini API key not configured");
-    const parts = Array.isArray(prompt) ? prompt : [prompt];
-    const resp = await gemini.callGemini(apiKey, modelId || "", parts);
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("Gemini API key not configured");
+
+  // build wrapped prompt and log it
+  const prepared = buildWrappedPrompt(prompt, modeId);
+  console.log('Prepared prompt for Gemini:', prepared);
+
+  const parts = Array.isArray(prepared) ? prepared : [prepared];
+  const resp = await gemini.callGemini(apiKey, modelId || "", parts);
     function extractTextFromResponse(r) {
       try {
         if (!r) return "";
@@ -105,11 +161,14 @@ function createRouter() {
     }
   }
 
-  async function sendPromptNvidia(modelId, prompt) {
+  async function sendPromptNvidia(modelId, prompt, modeId) {
     const apiKey = getNvidiaApiKey();
     if (!apiKey) throw new Error("NVIDIA API key not configured");
+    // build wrapped prompt and log it
+    const prepared = buildWrappedPrompt(prompt, modeId);
+    console.log('Prepared prompt for NVIDIA:', prepared);
 
-    const parts = Array.isArray(prompt) ? prompt : [prompt];
+    const parts = Array.isArray(prepared) ? prepared : [prepared];
     const resp = await nvidia.callNvidia(apiKey, modelId, parts);
 
     function extractTextFromNvidia(r) {

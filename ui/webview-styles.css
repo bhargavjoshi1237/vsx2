@@ -1,0 +1,348 @@
+body {
+  height: 100vh;
+  display: flex;
+  background-color: #181818;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow-x: hidden;
+}
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  word-break: break-word;
+}
+.bg-dark-primary {
+  background-color: #181818;
+}
+.bg-dark-secondary {
+  background-color: #2a2a2a;
+}
+.bg-dark-tertiary {
+  background-color: #1a1a1a;
+}
+.border-thin {
+  border: 1px solid #333;
+}
+
+.message {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-5px);
+  }
+}
+
+.animate-bounce {
+  animation: bounce 1s infinite;
+}
+
+.chat-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+  background: #2a2a2a;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 3px;
+}
+
+.chat-messages::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
+
+.resend-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.resend-btn:hover {
+  background: #474747;
+}
+
+.resend-btn:active {
+  transform: scale(0.95);
+}
+
+/* Statistics section styling */
+.message-stats {
+  font-weight: normal;
+  letter-spacing: normal;
+}
+
+/* New chat button styling */
+#new-chat-btn:hover {
+  background-color: #404040;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+#new-chat-btn:active {
+  transform: scale(0.95);
+}
+
+/* Options dropdown styling */
+#options-dropdown {
+  z-index: 1000;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+#options-dropdown button:hover {
+  background-color: #3a3a3a;
+}
+
+#options-btn:hover {
+  background-color: #404040;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+/* Code widget styling */
+.code-widget {
+  background: #212121;
+  border: 1px solid #474747;
+  padding: 8px;
+  border-radius: 6px;
+  color: #e6eef6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono",
+    "Courier New", monospace;
+}
+.code-lang-label {
+  font-size: 11px;
+  color: #9aa7b2;
+  margin-bottom: 6px;
+}
+.code-widget pre {
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+.code-widget-wrapper {
+  position: relative;
+  margin: 0.25rem 0;
+}
+.code-copy-btn {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  color: #cfe8ff;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.copy-feedback {
+  position: absolute;
+  right: 10px;
+  top: 38px;
+  background: #1f8cff;
+  color: white;
+  padding: 4px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  display: none;
+}
+
+.assistant-controls {
+  display: none;
+}
+.message.assistant-message.is-latest .assistant-controls {
+  display: flex;
+}
+
+.assistant-controls .reload-btn,
+.assistant-controls .edit-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #cfe8ff;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.assistant-controls .reload-btn:hover,
+.assistant-controls .edit-btn:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.inline-editor {
+  margin-top: 8px;
+  border: 5px solid #1f8cff;
+}
+.inline-editor textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 8px;
+  outline: none;
+  border-radius: 6px;
+  background: #1c2935;
+  color: #e6eef6;
+  border: 1px solid #2b2b2b;
+}
+.inline-editor .px-3 {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.sent-file-chips {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.sent-file-chips .chip {
+  background: rgba(255, 255, 255, 0.03);
+  color: #e7e7e7;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.user-message-files {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  max-width: calc(100% - 120px);
+  flex-wrap: wrap;
+}
+.user-message-files .chip {
+  background: rgba(255, 255, 255, 0.03);
+  color: #e7e7e7;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.user-message-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  width: 100%;
+}
+
+.message.user-message {
+  max-width: 80%;
+  margin-left: auto;
+  background-color: #1c2935;
+}
+
+.assistant-controls button {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.assistant-controls button svg {
+  display: block;
+}
+
+.message.user-message {
+  position: relative;
+}
+.message.user-message.editing {
+  padding: 0;
+}
+.message.user-message.editing .message-text {
+  display: none;
+}
+.message.user-message.editing textarea.inline-edit {
+  width: 100%;
+  border: none;
+  padding: 12px 44px 12px 12px;
+  background: transparent;
+  color: #e6eef6;
+  resize: vertical;
+  min-height: 80px;
+  display: block;
+  outline: none !important;
+}
+
+.message.user-message.editing {
+  padding: 0.5rem !important;
+  max-width: calc(100% - 32px) !important;
+  width: calc(100% - 32px) !important;
+  margin-left: 16px !important;
+  margin-right: 16px !important;
+  background-color: #1c2935 !important;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 10px !important;
+}
+.message.user-message .inline-controls {
+  display: none;
+}
+.message.user-message.editing .inline-controls {
+  display: flex;
+  gap: 8px;
+  position: absolute;
+  right: 12px;
+  top: -8px;
+}
+.inline-controls button {
+  background: rgba(255, 255, 255, 0.03);
+  border: none;
+  color: #e6eef6;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.inline-controls button svg {
+  display: block;
+}
+
+.message.user-message textarea.inline-edit {
+  display: none;
+}
+.message.user-message .inline-controls {
+  display: none;
+}
+
+.user-message-files {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.user-message-files .chip {
+  background: rgba(255, 255, 255, 0.03);
+  color: #e7e7e7;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
