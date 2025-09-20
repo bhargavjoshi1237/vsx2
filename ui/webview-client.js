@@ -18,6 +18,29 @@
   // store prompt metadata by requestId so reload/edit can resend
   const messageStore = new Map();
 
+  // Helper: remove assistant nodes and tool notifiers related to a requestId
+  function removeRelatedForRequest(requestId, opts = { keepUser: false }) {
+    try {
+      if (!requestId) return;
+      const nodes = Array.from(chatMessagesContainer.querySelectorAll('[data-request-id]'));
+      nodes.forEach(n => {
+        try {
+          if (n.dataset.requestId === String(requestId)) {
+            if (opts.keepUser) {
+              // skip if this node is a user bubble or a wrapper containing a user message
+              if ((n.classList && (n.classList.contains('user-message') || n.classList.contains('user-message-wrapper'))) || n.querySelector && n.querySelector('.user-message')) return;
+            }
+            // remove the node
+            if (n.parentNode) n.parentNode.removeChild(n);
+          }
+        } catch (e) {}
+      });
+      // also remove any tool notifier chips with same request id
+      const chips = Array.from(chatMessagesContainer.querySelectorAll('.tool-chip[data-request-id]'));
+      chips.forEach(c => { if (c.dataset.requestId === String(requestId) && c.parentNode) c.parentNode.removeChild(c); });
+    } catch (e) { console.error('removeRelatedForRequest error', e); }
+  }
+
   function appendMessage(role, text, meta, responseData) {
     try {
       const tplId = role === 'user' ? 'template-chat-user' : 'template-chat-assistant';
@@ -53,6 +76,16 @@
         }
 
         chatMessagesContainer.appendChild(node);
+        // Ensure assistant controls render at the end of the message node (after tool-calls and content)
+        if (role === 'assistant') {
+          try {
+            const controls = node.querySelector('.assistant-controls');
+            if (controls && controls.parentNode) {
+              controls.parentNode.removeChild(controls);
+              node.appendChild(controls);
+            }
+          } catch (e) { /* ignore */ }
+        }
         // if assistant role, mark as latest and remove latest from previous assistant messages
         if (role === 'assistant') {
           try {
@@ -60,11 +93,19 @@
             const prevLatest = chatMessagesContainer.querySelector('.assistant-message.is-latest');
             if (prevLatest && prevLatest !== node) prevLatest.classList.remove('is-latest');
             node.classList.add('is-latest');
-            // attach handlers (controls only visible on latest due to CSS)
-            const reloadBtn = node.querySelector('.reload-btn');
-            const editBtn = node.querySelector('.edit-btn');
-            if (reloadBtn) reloadBtn.addEventListener('click', (ev) => { ev.stopPropagation(); console.debug('reload clicked'); handleReload(node); });
-            if (editBtn) editBtn.addEventListener('click', (ev) => { ev.stopPropagation(); console.debug('edit clicked'); handleEdit(node); });
+            // Attach handlers to the newly-created assistant node's buttons so placeholders work
+            try {
+              const reloadBtn = node.querySelector('.reload-btn');
+              const editBtn = node.querySelector('.edit-btn');
+              if (reloadBtn && !reloadBtn.hasAttribute('data-handler-attached')) {
+                reloadBtn.addEventListener('click', (ev) => { ev.stopPropagation(); console.debug('reload clicked'); handleReload(node); });
+                reloadBtn.setAttribute('data-handler-attached', 'true');
+              }
+              if (editBtn && !editBtn.hasAttribute('data-handler-attached')) {
+                editBtn.addEventListener('click', (ev) => { ev.stopPropagation(); console.debug('edit clicked'); handleEdit(node); });
+                editBtn.setAttribute('data-handler-attached', 'true');
+              }
+            } catch (e) { /* ignore */ }
           } catch (e) { console.error('attach control handlers error', e); }
         }
         chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
@@ -105,8 +146,8 @@
       if (!oldReq) return;
       const meta = messageStore.get(String(oldReq));
       if (!meta) return;
-      // remove old assistant node
-      assistantNode.remove();
+      // remove old assistant nodes and any tool notifiers for this request (keep the user message)
+      removeRelatedForRequest(String(oldReq), { keepUser: true });
       // create new placeholder assistant and send again
       const newReq = String(Date.now()) + Math.random().toString(36).slice(2,8);
       const placeholderNode = appendMessage('assistant', '', '');
@@ -254,16 +295,18 @@ function createInlineEditor(userNode, initialText) {
         const newText = inlineTa.value.trim();
         if (!newText) return;
         if (textEl) textEl.textContent = newText;
-        // hide editor
-        userNode.classList.remove('editing');
-        inlineTa.style.display = 'none';
-        inlineControls.style.display = 'none';
-        // remove old assistant node
-        try { assistantNode.remove(); } catch (e) {}
+  // hide editor
+  userNode.classList.remove('editing');
+  inlineTa.style.display = 'none';
+  inlineControls.style.display = 'none';
+  // remove old assistant responses and tool notifiers for this request
+  removeRelatedForRequest(String(req), { keepUser: true });
         // send new prompt
         const newReq = String(Date.now()) + Math.random().toString(36).slice(2,8);
-        const placeholderNode = appendMessage('assistant', '', '');
-        if (placeholderNode) placeholderNode.dataset.requestId = newReq;
+  const placeholderNode = appendMessage('assistant', '', '');
+  // ensure placeholder is placed after the user message for correct updating
+  try { if (userNode && placeholderNode && userNode.parentNode) userNode.parentNode.insertBefore(placeholderNode, userNode.nextSibling); } catch (e) {}
+  if (placeholderNode) placeholderNode.dataset.requestId = newReq;
         // build payload (preserve files if present)
         const stored = messageStore.get(String(req)) || {};
         let payload = newText;
@@ -565,26 +608,92 @@ function createInlineEditor(userNode, initialText) {
   function renderLegacyTool(toolName, input, output) {
     const toolEl = document.createElement('div');
     toolEl.className = 'legacy-tool-item bg-[#2a2a2a] border border-blue-600 rounded-lg p-3 mb-3';
-    
+
+    // If fileread output, render compact file list with preview toggles
+    try {
+      if (String(toolName).toLowerCase().includes('fileread') && output && output.files && Array.isArray(output.files)) {
+        const filesHtml = output.files.map(f => {
+          const success = f.success ? '✅' : '❌';
+          const label = f.relativePath || f.path || '';
+          const preview = f.content ? escapeHtml(String(f.content).slice(0, 200)) : (f.error || '');
+          return `<div class="file-read-item mb-2">
+            <div class="flex items-center justify-between">
+              <div class="text-xs text-gray-300">${success} ${label}</div>
+              <button class="preview-btn text-xs text-blue-400">Preview</button>
+            </div>
+            <pre class="file-preview hidden bg-[#111] p-2 rounded text-xs text-gray-300 mt-2 overflow-auto">${preview}</pre>
+          </div>`;
+        }).join('\n');
+
+        toolEl.innerHTML = `
+          <div class="flex items-center space-x-2 mb-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" class="text-blue-400"><path fill="currentColor" d="M21 8V7l-3 2l3 2v-1h2V8h-2zM3 6v12h14v2H1V4h2v2z"/></svg>
+            <span class="text-xs font-medium text-blue-400">File Read</span>
+            <span class="tool-name text-xs text-gray-300">${escapeHtml(String(toolName))}</span>
+          </div>
+          <div class="tool-files-list">${filesHtml}</div>
+        `;
+
+        // attach toggle handlers after DOM insertion
+        const tmp = document.createElement('div'); tmp.innerHTML = toolEl.innerHTML;
+        toolEl.innerHTML = '';
+        toolEl.appendChild(tmp);
+        const btns = toolEl.querySelectorAll('.preview-btn');
+        btns.forEach(b => {
+          b.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            const parent = b.closest('.file-read-item');
+            if (!parent) return;
+            const pre = parent.querySelector('.file-preview');
+            if (!pre) return;
+            if (pre.classList.contains('hidden')) pre.classList.remove('hidden'); else pre.classList.add('hidden');
+          });
+        });
+        return toolEl;
+      }
+
+      // If searchfile output (list of files), render compact list
+      if (String(toolName).toLowerCase().includes('searchfile') && output && output.files && Array.isArray(output.files)) {
+        const items = output.files.map(f => `<div class="search-item text-xs text-gray-300 mb-1">${escapeHtml(f.relativePath || f.path || '')}</div>`).join('');
+        toolEl.innerHTML = `
+          <div class="flex items-center space-x-2 mb-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" class="text-blue-400"><path fill="currentColor" d="M9.5 3A6.5 6.5 0 1 1 3 9.5A6.5 6.5 0 0 1 9.5 3m0-2A8.5 8.5 0 1 0 18 9.5A8.5 8.5 0 0 0 9.5 1zM20 20l-4.35-4.35l1.41-1.41L21.41 18.6z"/></svg>
+            <span class="text-xs font-medium text-blue-400">Search Results</span>
+            <span class="tool-name text-xs text-gray-300">${escapeHtml(String(toolName))}</span>
+          </div>
+          <div class="search-results-list bg-[#111] p-2 rounded text-xs">${items}</div>
+        `;
+        return toolEl;
+      }
+    } catch (e) {
+      console.error('renderLegacyTool specialized error', e);
+    }
+
+    // Fallback generic render
     toolEl.innerHTML = `
       <div class="flex items-center space-x-2 mb-2">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" class="text-blue-400">
           <path fill="currentColor" d="M22.7 19l-9.1-9.1c.9-2.3.4-5.1-1.5-6.9c-2.3-2.3-5.9-2.5-8.4-.6L7.5 6.1L6.1 7.5L2.3 3.7c-1.9 2.5-1.7 6.1.6 8.4c1.8 1.8 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4Z"/>
         </svg>
         <span class="text-xs font-medium text-blue-400">Tool Call</span>
-        <span class="tool-name text-xs text-gray-300">${toolName}</span>
+        <span class="tool-name text-xs text-gray-300">${escapeHtml(String(toolName))}</span>
       </div>
       <div class="tool-input bg-[#1a1a1a] p-2 rounded text-xs text-gray-300 mb-2">
         <div class="text-xs text-gray-500 mb-1">Input:</div>
-        <div class="tool-input-content">${JSON.stringify(input, null, 2)}</div>
+        <div class="tool-input-content">${escapeHtml(JSON.stringify(input, null, 2))}</div>
       </div>
       <div class="tool-output bg-[#1a1a1a] p-2 rounded text-xs">
         <div class="text-xs text-gray-500 mb-1">Output:</div>
-        <div class="tool-output-content text-gray-300">${JSON.stringify(output, null, 2)}</div>
+        <div class="tool-output-content text-gray-300">${escapeHtml(JSON.stringify(output, null, 2))}</div>
       </div>
     `;
-    
+
     return toolEl;
+  }
+
+  // small helper to escape HTML
+  function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
   
   function renderLegacyError(context, message, suggestion) {
@@ -632,6 +741,42 @@ function createInlineEditor(userNode, initialText) {
       if (thinkingData && thinkingData.trim()) {
         setupThinkingToggle(messageNode, thinkingData);
       }
+
+      // Render any tool calls returned by the assistant (searchfile / fileread)
+      try {
+        const tools = (responseData && responseData.tools_called) ||
+                      (responseData && responseData.raw && responseData.raw.tools_called) ||
+                      (responseData && responseData.raw && responseData.raw.tool_calls) ||
+                      (responseData && responseData.tool_calls);
+        if (tools && Array.isArray(tools) && tools.length) {
+          // create container under message-meta
+          let container = messageNode.querySelector('.tool-calls-container');
+          if (!container) {
+            container = document.createElement('div');
+            container.className = 'tool-calls-container mt-3';
+              const meta = messageNode.querySelector('.message-meta') || messageNode;
+              meta.parentNode && meta.parentNode.insertBefore(container, meta.nextSibling || null);
+          }
+          // clear existing
+          container.innerHTML = '';
+          tools.forEach(tc => {
+            try {
+              const name = tc.tool || tc.name || tc.toolName || 'tool';
+              const out = tc.result || tc.output || tc || {};
+              const node = renderLegacyTool(name, tc.args || tc.input || {}, out);
+              if (node) container.appendChild(node);
+            } catch (e) { console.error('render tool call item error', e); }
+          });
+          // After inserting tool calls, ensure assistant-controls are moved after them
+          try {
+            const controls = messageNode.querySelector('.assistant-controls');
+            if (controls && controls.parentNode) {
+              controls.parentNode.removeChild(controls);
+              container.parentNode && container.parentNode.appendChild(controls);
+            }
+          } catch (e) { /* non-fatal */ }
+        }
+      } catch (ee) { console.error('populateEnhancedMetadata tool rendering error', ee); }
 
     } catch (e) {
       console.error('Error populating enhanced metadata:', e);
@@ -809,6 +954,11 @@ function createInlineEditor(userNode, initialText) {
         }
       } catch (e) { console.error(e); }
     }
+    // ensure placeholder sits right after the user message for grouping
+    try {
+      const userInner = userNode && userNode.querySelector && userNode.querySelector('.user-message');
+      if (userInner && placeholderNode && userInner.parentNode) userInner.parentNode.insertBefore(placeholderNode, userInner.nextSibling);
+    } catch (e) { /* ignore */ }
 
     try {
       let payloadPrompt = text;
@@ -821,6 +971,165 @@ function createInlineEditor(userNode, initialText) {
       vscode.postMessage({ command: 'sendPrompt', modelId: selectedModelId, prompt: payloadPrompt, requestId, modeId: selectedModeId });
     } catch (e) {
       console.error('Failed to post sendPrompt', e);
+    }
+  }
+
+  // Tool Call Notifier Functions
+  function showToolNotifier(toolName, searchQuery, requestedFile, requestId) {
+    try {
+      const template = document.getElementById('template-tool-notifier');
+      if (!template || !template.content) return;
+      
+      const notifier = template.content.firstElementChild.cloneNode(true);
+      // populate chip content
+      const actionEl = notifier.querySelector('.tool-chip-action');
+      const detailsEl = notifier.querySelector('.tool-chip-details');
+      const iconEl = notifier.querySelector('.tool-chip-icon');
+      const closeBtn = notifier.querySelector('.tool-chip-close');
+      if (actionEl) actionEl.textContent = ` ${toolName} `;
+      if (detailsEl) {
+        const parts = [];
+        if (searchQuery) parts.push(`Searched: "${searchQuery}"`);
+        if (requestedFile) {
+          // Only show the file name and extension, not the full path
+          const fileName = requestedFile.split(/[\\/]/).pop();
+          parts.push(`File: ${fileName}`);
+        }
+        detailsEl.textContent = parts.join(' • ');
+      }
+      if (iconEl) {
+        let ext = '';
+        if (requestedFile && typeof requestedFile === 'string') {
+          const lastDot = requestedFile.lastIndexOf('.');
+          if (lastDot !== -1 && lastDot < requestedFile.length - 1) {
+        ext = requestedFile.substring(lastDot + 1).toUpperCase();
+          } else {
+        ext = requestedFile.slice(-3).toUpperCase();
+          }
+        } else {
+          ext = '';
+        }
+        iconEl.textContent = ext || '';
+      }
+      // tag notifier for request-scoped removal
+      if (requestId) try { notifier.dataset.requestId = String(requestId); } catch (e) {}
+      // wire the close button
+      if (closeBtn) {
+        closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); const p = notifier.parentNode; if (p) p.removeChild(notifier); });
+      }
+
+      // If a requestId is provided, try to insert into the matching assistant node
+      if (requestId && chatMessagesContainer) {
+        const assistantNode = chatMessagesContainer.querySelector(`.assistant-message[data-request-id="${requestId}"]`) ||
+                              chatMessagesContainer.querySelector(`[data-request-id="${requestId}"]`);
+        if (assistantNode) {
+          // prefer the tool-calls container if present
+          const toolContainer = assistantNode.querySelector('.tool-calls-container');
+          if (toolContainer) {
+            toolContainer.appendChild(notifier);
+            return notifier;
+          }
+          // otherwise insert after meta or at top
+          const meta = assistantNode.querySelector('.message-meta');
+          if (meta && meta.parentNode) meta.parentNode.insertBefore(notifier, meta.nextSibling || null);
+          else {
+            const firstChild = assistantNode.firstElementChild;
+            if (firstChild) assistantNode.insertBefore(notifier, firstChild);
+            else assistantNode.appendChild(notifier);
+          }
+          return notifier;
+        }
+      }
+
+      // Fallback: append to chat messages container wrapped and right-aligned
+      if (chatMessagesContainer) {
+        // wrap notifier so we can right-align it like assistant messages
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.justifyContent = 'flex-end';
+        wrapper.style.padding = '4px 8px';
+        wrapper.appendChild(notifier);
+        // tag wrapper with request id too
+        if (requestId) try { wrapper.dataset.requestId = String(requestId); } catch (e) {}
+        // wire a close to remove wrapper
+        const closeInside = notifier.querySelector('.tool-chip-close');
+        if (closeInside) closeInside.addEventListener('click', (ev) => { ev.stopPropagation(); if (wrapper.parentNode) wrapper.parentNode.removeChild(wrapper); });
+        chatMessagesContainer.appendChild(wrapper);
+        chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+      }
+      return notifier;
+    } catch (e) {
+      console.error('Error showing tool notifier:', e);
+    }
+  }
+  
+
+  // Parse tool calls from response text
+  function parseToolCalls(responseText) {
+    try {
+      if (!responseText || typeof responseText !== 'string') return [];
+      
+      const toolCalls = [];
+      
+      // Look for common tool call patterns in the response
+      const patterns = [
+        /(?:searched|searching|search)\s+(?:for\s+)?["']([^"']+)["']/gi,
+        /(?:reading|read|opened?)\s+(?:file\s+)?["']([^"']+)["']/gi,
+        /(?:writing|wrote|creating|created)\s+(?:file\s+)?["']([^"']+)["']/gi,
+        /(?:running|ran|executing|executed)\s+(?:command\s+)?["']([^"']+)["']/gi,
+        /(?:installing|installed)\s+(?:package\s+)?["']([^"']+)["']/gi
+      ];
+      
+      patterns.forEach((pattern) => {
+        let match;
+        while ((match = pattern.exec(responseText)) !== null) {
+          toolCalls.push({
+            action: match[0].split(/\s+/)[0],
+            target: match[1]
+          });
+        }
+      });
+      
+      return toolCalls;
+    } catch (e) {
+      console.error('Error parsing tool calls:', e);
+      return [];
+    }
+  }
+
+  // Check response for tool usage and show notifier
+  function checkAndShowToolNotifier(response, responseText) {
+    try {
+      // Check for tool usage in the response metadata
+      if (response && response.tool_calls && Array.isArray(response.tool_calls)) {
+        response.tool_calls.forEach(toolCall => {
+          const toolName = toolCall.name || toolCall.tool || 'Tool';
+          const params = toolCall.parameters || toolCall.args || {};
+          
+          let searchQuery = '';
+          let requestedFile = '';
+          
+          // Extract relevant parameters based on common tool patterns
+          if (params.query) searchQuery = params.query;
+          if (params.filePath) requestedFile = params.filePath;
+          if (params.path) requestedFile = params.path;
+          if (params.file) requestedFile = params.file;
+          if (params.command) searchQuery = params.command;
+          
+          showToolNotifier(toolName, searchQuery, requestedFile);
+        });
+        return;
+      }
+      
+      // Fallback: parse tool calls from response text
+      const toolCalls = parseToolCalls(responseText);
+      if (toolCalls.length > 0) {
+        toolCalls.forEach(toolCall => {
+          showToolNotifier(toolCall.action, '', toolCall.target);
+        });
+      }
+    } catch (e) {
+      console.error('Error checking tool calls:', e);
     }
   }
 
@@ -864,9 +1173,9 @@ function createInlineEditor(userNode, initialText) {
       case 'promptResponse':
         try {
           const rid = m.requestId;
-          const nodes = chatMessagesContainer.querySelectorAll('[data-request-id]');
-          let found = null;
-          nodes.forEach(n => { if (n.dataset.requestId === String(rid)) found = n; });
+          // Prefer an assistant-message with this request id. Fallback to any node with the id.
+          let found = chatMessagesContainer.querySelector(`.assistant-message[data-request-id="${rid}"]`);
+          if (!found) found = chatMessagesContainer.querySelector(`[data-request-id="${rid}"]`);
           
           const text = m.response && m.response.plain_text ? m.response.plain_text :
                        (m.response && m.response.text ? m.response.text : 
@@ -878,11 +1187,17 @@ function createInlineEditor(userNode, initialText) {
                        (m.error ? ('Error: ' + m.error) : 
                        (m.response && m.response.raw ? JSON.stringify(m.response.raw) : '')));
 
+          // Check for tool call indicators and show notifier
+          if (m.response && !m.error) {
+            checkAndShowToolNotifier(m.response, text);
+          }
+
           if (found) {
+            // update existing assistant node
             const textEl = found.querySelector('.message-text');
             const metaEl = found.querySelector('.message-meta');
             const thinkingEl = found.querySelector('.thinking-text');
-            
+
             if (textEl) renderMessageContent(textEl, text);
             if (thinkingEl) renderMessageContent(thinkingEl, thinking);
 
@@ -890,28 +1205,36 @@ function createInlineEditor(userNode, initialText) {
               const spinnerEl = metaEl.querySelector('.assistant-spinner');
               const statusEl = metaEl.querySelector('.status-text');
               const metaTextEl = metaEl.querySelector('.meta-text');
-              
+
               if (spinnerEl) spinnerEl.style.display = 'none';
               if (statusEl) statusEl.style.display = 'none';
               if (metaTextEl) metaTextEl.innerText = '';
-              
+
               if (m.response) {
                 populateEnhancedMetadata(found, m.response);
               }
             }
-            
+
             // Handle Legacy Mode specific updates
             if (m.response && m.response.legacyMode) {
               handleLegacyModeUpdate(found, m.response);
             }
-            
-            // keep request-id on assistant node so reload/edit remain available
+            // ensure this node remains tagged for reload/edit
+            found.dataset.requestId = String(rid);
           } else {
+            // create a new assistant node (place it after matching user message if present)
+            let userNode = chatMessagesContainer.querySelector(`.user-message[data-request-id="${rid}"]`);
             const newNode = appendMessage('assistant', text, '', m.response);
-            
-            // Handle Legacy Mode for new messages
-            if (newNode && m.response && m.response.legacyMode) {
-              handleLegacyModeUpdate(newNode, m.response);
+            if (newNode) {
+              newNode.dataset.requestId = String(rid);
+              // try to position after the user message for visual grouping
+              if (userNode && userNode.parentNode) {
+                try { userNode.parentNode.insertBefore(newNode, userNode.nextSibling); } catch (e) { /* ignore */ }
+              }
+              // Handle Legacy Mode for new messages
+              if (m.response && m.response.legacyMode) {
+                handleLegacyModeUpdate(newNode, m.response);
+              }
             }
           }
         } catch (e) { 
@@ -927,6 +1250,69 @@ function createInlineEditor(userNode, initialText) {
         break;
       case 'legacyModeConfirmation':
         handleLegacyModeConfirmation(m);
+        break;
+      case 'toolCallNotification':
+        try {
+          if (m.toolCall) {
+            const toolName = m.toolCall.tool || 'Tool';
+            const args = m.toolCall.args || {};
+            
+            let searchQuery = '';
+            let requestedFile = '';
+            
+            // Extract meaningful information from args
+            if (args.query) searchQuery = args.query;
+            if (args.q) searchQuery = args.q;
+            if (args.filePath) requestedFile = args.filePath;
+            if (args.path) requestedFile = args.path;
+            if (args.file) requestedFile = args.file;
+            if (args.command) searchQuery = args.command;
+            
+            showToolNotifier(toolName, searchQuery, requestedFile, m.toolCall && m.toolCall.requestId ? String(m.toolCall.requestId) : null);
+          }
+        } catch (e) {
+          console.error('Error handling tool call notification:', e);
+        }
+        break;
+      case 'appendChatMessage':
+        try {
+          if (m.role && m.text) {
+            // Create responseData with requestId for button functionality
+            const responseData = m.requestId ? { requestId: m.requestId } : null;
+            const newNode = appendMessage(m.role, m.text, m.meta || '', responseData);
+            
+            // Set requestId on the node for edit/reload functionality
+            if (newNode && m.requestId) {
+              newNode.dataset.requestId = m.requestId;
+            }
+          }
+        } catch (e) {
+          console.error('Error handling append chat message:', e);
+        }
+        break;
+      case 'clearWorkingStatus':
+        try {
+          if (m.requestId) {
+            // Find the assistant message with matching requestId and clear working status
+            const nodes = chatMessagesContainer.querySelectorAll('[data-request-id]');
+            nodes.forEach(n => {
+              if (n.dataset.requestId === String(m.requestId) && n.classList.contains('assistant-message')) {
+                const metaEl = n.querySelector('.message-meta');
+                if (metaEl) {
+                  const spinnerEl = metaEl.querySelector('.assistant-spinner');
+                  const statusEl = metaEl.querySelector('.status-text');
+                  const metaTextEl = metaEl.querySelector('.meta-text');
+                  
+                  if (spinnerEl) spinnerEl.style.display = 'none';
+                  if (statusEl) statusEl.style.display = 'none';
+                  if (metaTextEl) metaTextEl.innerText = '';
+                }
+              }
+            });
+          }
+        } catch (e) {
+          console.error('Error handling clear working status:', e);
+        }
         break;
       default:
         break;

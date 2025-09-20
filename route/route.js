@@ -1,7 +1,7 @@
 const gemini = require("./geminiclient");
 const modes = require("../modes");
 
-function createRouter() {
+function createRouter(context, webviewProvider) {
 
   function buildWrappedPrompt(userPrompt, modeId) {
     let top = '';
@@ -93,14 +93,14 @@ function createRouter() {
     };
   }
 
-  async function sendPrompt(modelId, prompt, modeId) {
+  async function sendPrompt(modelId, prompt, modeId, requestId) {
     try {
       const models = await getModels();
       const byId = models.byId || {};
       const modelMeta = modelId && byId[modelId] ? byId[modelId] : null;
       const looksLikeNvidia = typeof modelId === 'string' && modelId.includes('/');
       if ((modelMeta && modelMeta.provider === 'nvidia') || (!modelMeta && looksLikeNvidia)) {
-        return await sendPromptNvidia(modelId, prompt, modeId);
+        return await sendPromptNvidia(modelId, prompt, modeId, requestId);
       }
     } catch {
     }
@@ -114,7 +114,7 @@ function createRouter() {
 
   const parts = Array.isArray(prepared) ? prepared : [prepared];
   const resp = await gemini.callGemini(apiKey, modelId || "", parts);
-    function extractTextFromResponse(r) {
+  function extractTextFromResponse(r) {
       try {
         if (!r) return "";
         if (Array.isArray(r.candidates)) {
@@ -148,7 +148,10 @@ function createRouter() {
       }
     }
     const text = extractTextFromResponse(resp);
-    return { raw: resp, text };
+
+    const formatter = require('./formatter');
+    const formatted = formatter.formatResponse(resp, modeId, webviewProvider, requestId, modelId);
+    return { raw: resp, text, parsed: formatted.parsed, user_text: formatted.user_text };
   }
   const nvidia = require("./nvidiaclient");
   function getNvidiaApiKey() {
@@ -161,7 +164,7 @@ function createRouter() {
     }
   }
 
-  async function sendPromptNvidia(modelId, prompt, modeId) {
+  async function sendPromptNvidia(modelId, prompt, modeId, requestId) {
     const apiKey = getNvidiaApiKey();
     if (!apiKey) throw new Error("NVIDIA API key not configured");
     // build wrapped prompt and log it
@@ -169,9 +172,9 @@ function createRouter() {
     console.log('Prepared prompt for NVIDIA:', prepared);
 
     const parts = Array.isArray(prepared) ? prepared : [prepared];
-    const resp = await nvidia.callNvidia(apiKey, modelId, parts);
+  const resp = await nvidia.callNvidia(apiKey, modelId, parts);
 
-    function extractTextFromNvidia(r) {
+  function extractTextFromNvidia(r) {
       try {
         if (!r) return "";
         if (Array.isArray(r.choices)) {
@@ -200,7 +203,10 @@ function createRouter() {
     }
 
     const text = extractTextFromNvidia(resp);
-    return { raw: resp, text };
+
+    const formatter = require('./formatter');
+    const formatted = formatter.formatResponse(resp, modeId, webviewProvider, requestId);
+    return { raw: resp, text, parsed: formatted.parsed, user_text: formatted.user_text };
   }
 
   return {

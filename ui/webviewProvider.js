@@ -5,7 +5,7 @@ const vscode = require("vscode");
 let routerFactory;
 try {
   routerFactory = require("../route/route").createRouter;
-} catch (e) {
+    } catch {
   routerFactory = null;
 }
 
@@ -52,6 +52,10 @@ class MyWebviewProvider {
       path.join(extensionPath, "ui", "components", "legacy-templates.html"),
       ""
     );
+    const toolNotifierTpl = this.safeRead(
+      path.join(extensionPath, "ui", "components", "tool-notifier.html"),
+      ""
+    );
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this.context.extensionUri],
@@ -88,12 +92,13 @@ class MyWebviewProvider {
         </div>
   ${chatUserTpl}
   ${legacyTemplates}
+  ${toolNotifierTpl}
   <script src="${scriptUri}"></script>
       </body>
       </html>
     `;
     try {
-      this.router = routerFactory ? routerFactory(this.context) : null;
+      this.router = routerFactory ? routerFactory(this.context, this) : null;
     } catch (err) {
       console.error("Failed to create router:", err);
       this.router = null;
@@ -197,13 +202,13 @@ class MyWebviewProvider {
                     modelMeta.provider === "nvidia" &&
                     typeof this.router.sendPromptNvidia === "function"
                   ) {
-                    resp = await this.router.sendPromptNvidia(modelId, prompt);
+                    resp = await this.router.sendPromptNvidia(modelId, prompt, modeId, requestId);
                   } else {
-                    resp = await this.router.sendPrompt(modelId, prompt);
+                    resp = await this.router.sendPrompt(modelId, prompt, modeId, requestId);
                   }
                 } catch {
                   // fallback to generic sendPrompt
-                  resp = await this.router.sendPrompt(modelId, prompt);
+                  resp = await this.router.sendPrompt(modelId, prompt, modeId, requestId);
                 }
               }
               // Use parser to extract exact plain_text and thinking_text when available
@@ -215,10 +220,13 @@ class MyWebviewProvider {
                   : { plain_text: "", thinking_text: "", metadata: {} };
                 // Attach parsed fields onto the response object sent to the webview
                 const responseForUI = Object.assign({}, resp);
-                responseForUI.plain_text = parsed.plain_text;
+                // If router returned a direct `user_text`, prefer that for UI.
+                responseForUI.plain_text =
+                  (resp && typeof resp.user_text === 'string' && resp.user_text.length)
+                    ? resp.user_text
+                    : parsed.plain_text;
                 responseForUI.thinking_text = parsed.thinking_text;
-                responseForUI.metadata =
-                  parsed.metadata || responseForUI.metadata || {};
+                responseForUI.metadata = parsed.metadata || responseForUI.metadata || {};
                 this.webviewView.webview.postMessage({
                   command: "promptResponse",
                   requestId,
@@ -434,7 +442,7 @@ class MyWebviewProvider {
   }
 
   // Legacy Mode Handlers
-  async handleLegacyMode(modelId, prompt, requestId, originalMessage) {
+  async handleLegacyMode(modelId, prompt, requestId) {
     try {
       console.log('Handling Legacy Mode execution for request:', requestId);
       
@@ -461,14 +469,56 @@ class MyWebviewProvider {
         modelId,
         prompt,
         requestId,
-        context: this.context
+        context: this.context,
       });
+
+      // Normalize and format response for UI: prefer a router-provided
+      // `user_text` if present, otherwise use parsed plain_text.
+      const responseForUI = Object.assign({}, resp);
+      try {
+        let parserLocal = null;
+        try {
+          parserLocal = require('../route/parser');
+        } catch {
+          parserLocal = null;
+        }
+
+        const parsed = parserLocal
+          ? parserLocal.parseResponse(resp && resp.raw !== undefined ? resp.raw : resp)
+          : { plain_text: '', thinking_text: '', metadata: {} };
+
+        // If router already returned `user_text`, use it. Otherwise try to
+        // parse parsed.plain_text as JSON and extract `user_text` field.
+        let user_text = null;
+        if (resp && typeof resp.user_text === 'string' && resp.user_text.length) {
+          user_text = resp.user_text;
+        } else if (parsed && typeof parsed.plain_text === 'string') {
+          try {
+            const maybeJson = JSON.parse(parsed.plain_text);
+            if (maybeJson && typeof maybeJson.user_text === 'string') user_text = maybeJson.user_text;
+          } catch {
+            // not JSON
+          }
+        }
+
+        responseForUI.plain_text = user_text || parsed.plain_text;
+        responseForUI.thinking_text = parsed.thinking_text;
+        responseForUI.metadata = parsed.metadata || responseForUI.metadata || {};
+      } catch {
+        // If parsing fails, fall back to sending raw router response
+      }
+
+      // COMMENTED OUT: Prevent updating first message with final text
+      // this.webviewView.webview.postMessage({
+      //   command: 'promptResponse',
+      //   requestId,
+      //   response: responseForUI,
+      // });
       
-      // Send response
+      // Send message to clear working status and hide spinner
       this.webviewView.webview.postMessage({
-        command: "promptResponse",
+        command: 'clearWorkingStatus',
         requestId,
-        response: resp,
       });
       
     } catch (err) {
@@ -487,7 +537,7 @@ class MyWebviewProvider {
       console.log('Legacy Mode confirmation received:', { todoId, approved, feedback });
       
       // Find the session that requested this confirmation
-      for (const [requestId, session] of this.legacyModeSessions.entries()) {
+      for (const session of this.legacyModeSessions.values()) {
         if (session.confirmationCallbacks && session.confirmationCallbacks.has(todoId)) {
           const callback = session.confirmationCallbacks.get(todoId);
           callback({ approved, feedback });
@@ -501,7 +551,7 @@ class MyWebviewProvider {
   }
   
   // Legacy Mode Tool Execution Methods
-  async executeLegacyTool(toolName, params, requestId) {
+  async executeLegacyTool(toolName, params) {
     try {
       let result;
       
@@ -675,6 +725,31 @@ class MyWebviewProvider {
       };
     } catch (error) {
       return { success: false, error: error.message, command };
+    }
+  }
+
+  // Method to notify webview about tool calls
+  notifyToolCall(toolCallData) {
+    try {
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage({
+          command: 'toolCallNotification',
+          toolCall: toolCallData
+        });
+      }
+    } catch (error) {
+      console.error('Failed to send tool call notification:', error);
+    }
+  }
+
+  // Method to send incremental messages to webview
+  sendIncrementalMessage(messageData) {
+    try {
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage(messageData);
+      }
+    } catch (error) {
+      console.error('Failed to send incremental message:', error);
     }
   }
 }

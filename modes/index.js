@@ -1,7 +1,8 @@
 // For now we register modes statically. This loader makes it easy to expand later.
 const ask = require('./ask');
+const legacy = require('./legacy');
 
-const MODES = [ask];
+const MODES = [ask, legacy];
 
 function listModes() {
   return MODES.map(m => ({ id: m.id, name: m.name }));
