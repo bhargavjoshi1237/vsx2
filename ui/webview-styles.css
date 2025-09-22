@@ -163,57 +163,20 @@ body {
   border-radius: 6px;
   cursor: pointer;
 }
+
+.code-copy-btn:hover {
+  background: #3b3b3b;
+}
 .copy-feedback {
   position: absolute;
   right: 10px;
-  top: 38px;
-  background: #1f8cff;
+  top: 48px;
+  background: #282828;
   color: white;
   padding: 4px 6px;
   font-size: 11px;
   border-radius: 4px;
   display: none;
-}
-
-.assistant-controls {
-  display: none;
-}
-.message.assistant-message[data-request-id] .assistant-controls {
-  display: flex;
-}
-
-.assistant-controls .reload-btn,
-.assistant-controls .edit-btn {
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: #cfe8ff;
-  padding: 4px 8px;
-  font-size: 12px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.assistant-controls .reload-btn:hover,
-.assistant-controls .edit-btn:hover {
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.inline-editor {
-  margin-top: 8px;
-  border: 5px solid #1f8cff;
-}
-.inline-editor textarea {
-  width: 100%;
-  min-height: 80px;
-  padding: 8px;
-  outline: none;
-  border-radius: 6px;
-  background: #1c2935;
-  color: #e6eef6;
-  border: 1px solid #2b2b2b;
-}
-.inline-editor .px-3 {
-  padding-left: 12px;
-  padding-right: 12px;
 }
 
 .sent-file-chips {
@@ -259,80 +222,11 @@ body {
   background-color: #1c2935;
 }
 
-.assistant-controls button {
-  background: transparent;
-  border: none;
-  padding: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.assistant-controls button svg {
-  display: block;
-}
+/* assistant-controls removed: buttons and inline edit logic simplified */
 
 .message.user-message {
   position: relative;
 }
-.message.user-message.editing {
-  padding: 0;
-}
-.message.user-message.editing .message-text {
-  display: none;
-}
-.message.user-message.editing textarea.inline-edit {
-  width: 100%;
-  border: none;
-  padding: 12px 44px 12px 12px;
-  background: transparent;
-  color: #e6eef6;
-  resize: vertical;
-  min-height: 80px;
-  display: block;
-  outline: none !important;
-}
-
-.message.user-message.editing {
-  padding: 0.5rem !important;
-  max-width: calc(100% - 32px) !important;
-  width: calc(100% - 32px) !important;
-  margin-left: 16px !important;
-  margin-right: 16px !important;
-  background-color: #1c2935 !important;
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 10px !important;
-}
-.message.user-message .inline-controls {
-  display: none;
-}
-.message.user-message.editing .inline-controls {
-  display: flex;
-  gap: 8px;
-  position: absolute;
-  right: 12px;
-  top: -8px;
-}
-.inline-controls button {
-  background: rgba(255, 255, 255, 0.03);
-  border: none;
-  color: #e6eef6;
-  padding: 6px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-}
-.inline-controls button svg {
-  display: block;
-}
-
-.message.user-message textarea.inline-edit {
-  display: none;
-}
-.message.user-message .inline-controls {
-  display: none;
-}
-
 .user-message-files {
   display: flex;
   gap: 8px;

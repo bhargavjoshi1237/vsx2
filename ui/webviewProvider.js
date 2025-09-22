@@ -52,6 +52,10 @@ class MyWebviewProvider {
       path.join(extensionPath, "ui", "components", "legacy-templates.html"),
       ""
     );
+    const placeholderTpl = this.safeRead(
+      path.join(extensionPath, "ui", "components", "placeholder.html"),
+      ""
+    );
     const toolNotifierTpl = this.safeRead(
       path.join(extensionPath, "ui", "components", "tool-notifier.html"),
       ""
@@ -69,6 +73,8 @@ class MyWebviewProvider {
       path.join(extensionPath, "ui", "webview-styles.css")
     );
     const styleUri = webviewView.webview.asWebviewUri(stylePathOnDisk);
+    const iconPathOnDisk = vscode.Uri.file(path.join(extensionPath, 'media', 'icon.svg'));
+    const iconUri = webviewView.webview.asWebviewUri(iconPathOnDisk);
 
     webviewView.webview.html = `
       <!DOCTYPE html>
@@ -85,24 +91,45 @@ class MyWebviewProvider {
         ${header}
         <div id="chat-messages-container" class="chat-messages">
           ${chatMessages}
+          ${placeholderTpl}
         </div>
-        ${inputArea}
-        ${chatUserTpl}
-        ${chatAssistantTpl}
-        </div>
-  ${chatUserTpl}
+    ${inputArea}
+    ${chatUserTpl}
+    ${chatAssistantTpl}
+    </div>
   ${legacyTemplates}
   ${toolNotifierTpl}
   <script src="${scriptUri}"></script>
       </body>
       </html>
     `;
+    // Provide placeholder resources (iconUri) to webview client
+    try { webviewView.webview.postMessage({ command: 'placeholderResources', iconUri: String(iconUri) }); } catch (e) {}
     try {
       this.router = routerFactory ? routerFactory(this.context, this) : null;
     } catch (err) {
       console.error("Failed to create router:", err);
       this.router = null;
     }
+
+    // Send mode taglines mapping to webview so UI can show the appropriate placeholder tagline
+    try {
+      if (this.router && typeof this.router.listModes === 'function') {
+        this.router.listModes().then((modesList) => {
+          const modesArr = Array.isArray(modesList) ? modesList : (modesList && modesList.length ? modesList : []);
+          const taglines = {};
+          for (const m of modesArr) {
+            try {
+              if (m && m.id) taglines[m.id] = m.tagline || (m.wrappers && m.wrappers.title) || '';
+            } catch {
+            }
+          }
+          if (this.webviewView && this.webviewView.webview) {
+            this.webviewView.webview.postMessage({ command: 'modesTaglines', taglines });
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {}
 
     // Parser for normalizing responses into plain_text and thinking_text
     let parser = null;
@@ -115,6 +142,18 @@ class MyWebviewProvider {
     webviewView.webview.onDidReceiveMessage(
       async (message) => {
         switch (message.command) {
+          case 'newChat':
+            try {
+              console.log('New chat requested from webview');
+              // Notify UI to clear messages and reset any UI state
+              if (this.webviewView) {
+                this.webviewView.webview.postMessage({ command: 'newChat' });
+                this.webviewView.webview.postMessage({ command: 'clearWorkingStatus' });
+              }
+            } catch (err) {
+              console.error('Error handling newChat', err);
+            }
+            return;
           case "openFilePicker":
             this.openWorkspaceFilePicker();
             return;
@@ -123,6 +162,12 @@ class MyWebviewProvider {
             return;
           case "openApiKeySetup":
             this.openApiKeySetup();
+            return;
+          case "setCerebrasReasoning":
+            try {
+              await this.promptSetCerebrasReasoning();
+            } catch {
+            }
             return;
           case "getApiKey":
             this.getApiKey(message.client);
@@ -252,6 +297,15 @@ class MyWebviewProvider {
           case "legacyModeConfirmationResponse":
             this.handleLegacyModeConfirmation(message);
             return;
+          case "tool.writeFile":
+            // message: { command: 'tool.writeFile', filePath, newContent }
+            try {
+              await this.handleWriteFileTool(message.filePath, message.newContent, message.requestId);
+            } catch (err) {
+              console.error('Error handling tool.writeFile', err);
+              this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId: message.requestId, success: false, error: String(err) });
+            }
+            return;
         }
       },
       undefined,
@@ -261,10 +315,11 @@ class MyWebviewProvider {
 
   async openApiKeySetup() {
     try {
-      const clients = ["gemini", "nvidia"];
+      const clients = ["gemini", "nvidia", "cerebras"];
       const clientNames = {
         gemini: "Google Gemini",
         nvidia: "NVIDIA AI",
+        cerebras: "Cerebras",
       };
 
       const selectedClient = await vscode.window.showQuickPick(
@@ -339,6 +394,16 @@ class MyWebviewProvider {
       }
 
       if (action.action === "set") {
+        // If user selected Cerebras, also ask for reasoning effort preference
+        let reasoningPref = null;
+        if (selectedClient.client === 'cerebras') {
+          const r = await vscode.window.showQuickPick([
+            { label: 'Low', description: 'Lower reasoning effort (faster)', value: 'low' },
+            { label: 'Medium', description: 'Balanced reasoning effort', value: 'medium' },
+            { label: 'High', description: 'High reasoning effort (slower)', value: 'high' },
+          ], { placeHolder: 'Select default reasoning effort for Cerebras' });
+          if (r && r.value) reasoningPref = r.value;
+        }
         const apiKey = await vscode.window.showInputBox({
           prompt: `Enter your ${selectedClient.label} API key`,
           password: true,
@@ -359,6 +424,9 @@ class MyWebviewProvider {
               apiKey.trim(),
               vscode.ConfigurationTarget.Global
             );
+          if (selectedClient.client === 'cerebras' && reasoningPref) {
+            await vscode.workspace.getConfiguration('vsx').update('cerebras.reasoningEffort', reasoningPref, vscode.ConfigurationTarget.Global);
+          }
           vscode.window.showInformationMessage(
             `${selectedClient.label} API key saved successfully.`
           );
@@ -441,8 +509,24 @@ class MyWebviewProvider {
     }
   }
 
+  async promptSetCerebrasReasoning() {
+    try {
+      const vscode = require('vscode');
+      const choice = await vscode.window.showQuickPick([
+        { label: 'Low', description: 'Lower reasoning effort (faster)', value: 'low' },
+        { label: 'Medium', description: 'Balanced reasoning effort', value: 'medium' },
+        { label: 'High', description: 'High reasoning effort (slower)', value: 'high' },
+      ], { placeHolder: 'Select default reasoning effort for Cerebras' });
+      if (!choice) return;
+      await vscode.workspace.getConfiguration('vsx').update('cerebras.reasoningEffort', choice.value, vscode.ConfigurationTarget.Global);
+      vscode.window.showInformationMessage(`Cerebras reasoning effort set to ${choice.label}`);
+      if (this.webviewView) this.webviewView.webview.postMessage({ command: 'cerebrasReasoningChanged', value: choice.value });
+    } catch {
+    }
+  }
+
   // Legacy Mode Handlers
-  async handleLegacyMode(modelId, prompt, requestId) {
+  async handleLegacyMode(modelId, prompt, requestId, message) {
     try {
       console.log('Handling Legacy Mode execution for request:', requestId);
       
@@ -464,12 +548,19 @@ class MyWebviewProvider {
       this.legacyModeSessions.set(requestId, sessionContext);
       
       // Run Legacy Mode
+      // If the webview included `previous_chat_history` in the original message, forward it to the mode
+      let prevHistory = null;
+      try {
+        if (message && Array.isArray(message.previous_chat_history)) prevHistory = message.previous_chat_history;
+      } catch { }
+
       const resp = await this.router.runMode('legacy', {
         router: this.router,
         modelId,
         prompt,
         requestId,
         context: this.context,
+        previous_chat_history: prevHistory,
       });
 
       // Normalize and format response for UI: prefer a router-provided
@@ -504,22 +595,52 @@ class MyWebviewProvider {
         responseForUI.plain_text = user_text || parsed.plain_text;
         responseForUI.thinking_text = parsed.thinking_text;
         responseForUI.metadata = parsed.metadata || responseForUI.metadata || {};
+        // Ensure there is a top-level `text` field the UI can use to render content
+        try {
+          if (!responseForUI.text || String(responseForUI.text).trim().length === 0) {
+            if (typeof responseForUI.plain_text === 'string' && responseForUI.plain_text.trim().length) {
+              responseForUI.text = responseForUI.plain_text;
+            } else if (typeof responseForUI.user_text === 'string' && responseForUI.user_text.trim().length) {
+              responseForUI.text = responseForUI.user_text;
+            } else if (responseForUI.raw !== undefined) {
+              try {
+                responseForUI.text = typeof responseForUI.raw === 'string' ? responseForUI.raw : JSON.stringify(responseForUI.raw);
+              } catch {
+                responseForUI.text = String(responseForUI.raw || '');
+              }
+            } else {
+              responseForUI.text = '';
+            }
+          }
+        } catch (err) {
+          // best-effort; don't fail the entire response
+          try { responseForUI.text = responseForUI.plain_text || responseForUI.user_text || ''; } catch (e) { responseForUI.text = ''; }
+        }
       } catch {
         // If parsing fails, fall back to sending raw router response
       }
 
-      // COMMENTED OUT: Prevent updating first message with final text
-      // this.webviewView.webview.postMessage({
-      //   command: 'promptResponse',
-      //   requestId,
-      //   response: responseForUI,
-      // });
-      
+      // Send final response to webview so the UI can update the assistant message
+      try {
+        this.webviewView.webview.postMessage({
+          command: 'promptResponse',
+          requestId,
+          response: responseForUI,
+          final: true,
+        });
+      } catch (err) {
+        console.error('Failed to post final promptResponse for legacy mode', err);
+      }
+
       // Send message to clear working status and hide spinner
-      this.webviewView.webview.postMessage({
-        command: 'clearWorkingStatus',
-        requestId,
-      });
+      try {
+        this.webviewView.webview.postMessage({
+          command: 'clearWorkingStatus',
+          requestId,
+        });
+      } catch (err) {
+        console.error('Failed to post clearWorkingStatus for legacy mode', err);
+      }
       
     } catch (err) {
       console.error('Legacy Mode execution error:', err);
@@ -725,6 +846,291 @@ class MyWebviewProvider {
       };
     } catch (error) {
       return { success: false, error: error.message, command };
+    }
+  }
+
+  // New: handle write-file tool which shows a diff and offers Keep/Undo
+  async handleWriteFileTool(filePath, newContent, requestId) {
+    try {
+      const originalExists = fs.existsSync(filePath);
+      const originalContent = originalExists ? fs.readFileSync(filePath, 'utf8') : '';
+
+    // Show the diff to the user (inline unified diff preview) and wait for action
+    const keep = await this.showDiffAndPrompt(originalContent, newContent || '', filePath, requestId);
+
+    if (keep) {
+      // Notify UI that change was kept
+      this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId, success: true, action: 'kept', filePath });
+      return { success: true, action: 'kept', filePath };
+    } else {
+      // Notify UI that change was undone
+      this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId, success: true, action: 'undone', filePath });
+      return { success: true, action: 'undone', filePath };
+    }
+    } catch (error) {
+      console.error('handleWriteFileTool error', error);
+      this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId, success: false, error: String(error) });
+      return { success: false, error: String(error), filePath };
+    }
+  }
+
+  async showDiffAndPrompt(originalContent, proposedContent, targetPath) {
+    const vscode = require('vscode');
+    // Ensure a map for pending proposals exists
+    if (!this.pendingWriteProposals) this.pendingWriteProposals = new Map();
+    try {
+      // Use js 'diff' to compute line diffs if available
+      let parts = null;
+      try {
+        const jsdiff = require('diff');
+        parts = jsdiff.diffLines(originalContent || '', proposedContent || '');
+      } catch {
+        // fallback: treat whole file as replaced
+        parts = [{ removed: true, value: originalContent || '' }, { added: true, value: proposedContent || '' }];
+      }
+
+      // Build display lines with prefixes and collect types for decorations
+      const displayLines = [];
+      const lineTypes = []; // 'added'|'removed'|'context'
+      for (const p of parts) {
+        const segLines = String(p.value || '').split(/\n/);
+        // drop final empty line caused by trailing newline split
+        if (segLines.length > 0 && segLines[segLines.length - 1] === '') segLines.pop();
+        for (const l of segLines) {
+          if (p.added) {
+            displayLines.push('+ ' + l);
+            lineTypes.push('added');
+          } else if (p.removed) {
+            displayLines.push('- ' + l);
+            lineTypes.push('removed');
+          } else {
+            displayLines.push('  ' + l);
+            lineTypes.push('context');
+          }
+        }
+      }
+
+      const diffText = displayLines.join('\n');
+
+      // Try to reuse an existing visible editor for the target file so we replace its tab content.
+      let editor = null;
+      let doc = null;
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(targetPath)) {
+          const absPath = require('path').resolve(targetPath);
+          const visible = vscode.window.visibleTextEditors || [];
+          for (const ve of visible) {
+            try {
+              if (ve.document && ve.document.uri && ve.document.uri.fsPath && require('path').resolve(ve.document.uri.fsPath) === absPath) {
+                editor = ve;
+                doc = ve.document;
+                break;
+              }
+            } catch { }
+          }
+          if (!editor) {
+            doc = await vscode.workspace.openTextDocument(vscode.Uri.file(targetPath));
+            const active = vscode.window.activeTextEditor;
+            const viewColumn = active ? active.viewColumn : vscode.ViewColumn.Active;
+            editor = await vscode.window.showTextDocument(doc, { preview: false, viewColumn });
+          }
+        } else {
+          // file doesn't exist: open an untitled doc to preview
+          doc = await vscode.workspace.openTextDocument({ content: originalContent || '', language: 'plaintext' });
+          const active = vscode.window.activeTextEditor;
+          const viewColumn = active ? active.viewColumn : vscode.ViewColumn.Active;
+          editor = await vscode.window.showTextDocument(doc, { preview: false, viewColumn });
+        }
+      } catch {
+        doc = await vscode.workspace.openTextDocument({ content: originalContent || '', language: 'plaintext' });
+        const active = vscode.window.activeTextEditor;
+        const viewColumn = active ? active.viewColumn : vscode.ViewColumn.Active;
+        editor = await vscode.window.showTextDocument(doc, { preview: false, viewColumn });
+      }
+
+      // Save original buffer for restore if needed
+      const originalBuffer = doc.getText();
+
+      // Replace editor content with diffText (unsaved change)
+      await editor.edit((eb) => {
+        const lastLine = doc.lineCount > 0 ? doc.lineAt(doc.lineCount - 1).range.end : new vscode.Position(0, 0);
+        eb.replace(new vscode.Range(new vscode.Position(0, 0), lastLine), diffText);
+      });
+
+      // Create decoration types that mimic git added/removed styling
+      const addedDeco = vscode.window.createTextEditorDecorationType({
+        isWholeLine: true,
+        backgroundColor: 'rgba(16, 185, 129, 0.08)',
+        overviewRulerColor: 'rgba(16, 185, 129, 0.8)',
+        overviewRulerLane: vscode.OverviewRulerLane.Left,
+        border: '1px solid rgba(16,185,129,0.12)',
+        after: { margin: '0 0 0 10px' }
+      });
+      const removedDeco = vscode.window.createTextEditorDecorationType({
+        isWholeLine: true,
+        backgroundColor: 'rgba(239, 68, 68, 0.06)',
+        overviewRulerColor: 'rgba(239, 68, 68, 0.8)',
+        overviewRulerLane: vscode.OverviewRulerLane.Left,
+        border: '1px solid rgba(239,68,68,0.08)'
+      });
+
+      // Compute ranges for decorations accurately based on current document line lengths
+      const addedRanges = [];
+      const removedRanges = [];
+      for (let i = 0; i < lineTypes.length; i++) {
+        const t = lineTypes[i];
+        try {
+          const line = editor.document.lineAt(i);
+          const range = new vscode.Range(new vscode.Position(i, 0), line.range.end);
+          if (t === 'added') addedRanges.push(range);
+          else if (t === 'removed') removedRanges.push(range);
+        } catch {
+          // ignore out-of-range lines
+        }
+      }
+
+      try { editor.setDecorations(addedDeco, addedRanges); } catch {}
+      try { editor.setDecorations(removedDeco, removedRanges); } catch {}
+
+      // Create interactive in-editor controls: status bar items and hover command links
+      const id = String(targetPath) + '::' + String(Date.now()) + '::' + Math.random().toString(36).slice(2,8);
+
+      // Prepare a promise that will be resolved when user acts
+      let resolvePromise;
+      const actionPromise = new Promise((res) => { resolvePromise = res; });
+
+      // Save pending proposal info so commands can act on it
+      this.pendingWriteProposals.set(id, {
+        targetPath,
+        originalContent,
+        proposedContent,
+        editor,
+        originalBuffer,
+        addedDeco,
+        removedDeco,
+        resolve: resolvePromise,
+      });
+
+      // Create status bar items for Keep and Undo. Register dynamic commands so
+      // status bar clicks can invoke handlers with the proposal id.
+      try {
+        const keepItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        keepItem.text = '$(check) Keep';
+        keepItem.command = { command: 'vsx.keepChange', title: 'Keep change', arguments: [id] };
+        keepItem.tooltip = `Apply proposed changes to ${targetPath}`;
+        keepItem.show();
+
+        const undoItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+        undoItem.text = '$(close) Undo';
+        undoItem.command = { command: 'vsx.undoChange', title: 'Undo change', arguments: [id] };
+        undoItem.tooltip = `Discard proposed changes for ${targetPath}`;
+        undoItem.show();
+
+        // store items so they can be disposed after action
+        const pEntry = this.pendingWriteProposals.get(id);
+        pEntry.keepItem = keepItem;
+        pEntry.undoItem = undoItem;
+        try { if (this.context && this.context.subscriptions) { this.context.subscriptions.push(keepItem); this.context.subscriptions.push(undoItem); } } catch {}
+      } catch (e) { console.error('status bar creation failed', e); }
+
+      // Also add a hover with clickable command links on the first line to mimic in-editor buttons
+      try {
+        const pEntry = this.pendingWriteProposals.get(id);
+        const hoverRange = new vscode.Range(new vscode.Position(0,0), new vscode.Position(0,0));
+        const md = new vscode.MarkdownString(`[Keep](command:vsx.keepChange?${encodeURIComponent(JSON.stringify([id]))}) ⠀ [Undo](command:vsx.undoChange?${encodeURIComponent(JSON.stringify([id]))})`);
+        md.isTrusted = true;
+        const hoverDeco = vscode.window.createTextEditorDecorationType({ after: { contentText: ' ⠀ ⠀(Keep / Undo) ', margin: '0 0 0 20px' } });
+        try { editor.setDecorations(hoverDeco, [{ range: hoverRange, hoverMessage: md }]); } catch (e) { console.error('set hover decoration failed', e); }
+        pEntry.hoverDeco = hoverDeco;
+      } catch (e) { console.error('hover creation failed', e); }
+
+      // Notify the webview UI so it can show a small banner/notification
+      try {
+        if (this.webviewView && this.webviewView.webview) {
+          this.webviewView.webview.postMessage({ command: 'showNotification', text: `Preview opened for ${targetPath}. Use status bar Keep/Undo.` });
+        }
+      } catch (e) { /* ignore */ }
+
+      // Also show a native info message so the user notices the status bar buttons
+      try {
+        try { vscode.window.showInformationMessage(`Preview opened for ${targetPath}. Use status bar Keep/Undo.`); } catch (e) {}
+      } catch (e) {}
+
+      // Return a promise that resolves when keep/undo command is executed
+      return actionPromise;
+    } catch (err) {
+      console.error('showDiffAndPrompt failed', err);
+      return false;
+    }
+  }
+
+  // Commands invoked by status bar or hover links
+  async handleKeepById(id) {
+    try {
+      if (!this.pendingWriteProposals || !this.pendingWriteProposals.has(id)) return false;
+      const p = this.pendingWriteProposals.get(id);
+      const vscode = require('vscode');
+      const fs = require('fs');
+      const path = require('path');
+      try { fs.mkdirSync(path.dirname(p.targetPath), { recursive: true }); } catch {}
+      fs.writeFileSync(p.targetPath, p.proposedContent || '', 'utf8');
+
+      // Replace editor buffer with proposed content
+      try {
+        await p.editor.edit((eb) => {
+          const last = p.editor.document.lineCount > 0 ? p.editor.document.lineAt(p.editor.document.lineCount - 1).range.end : new vscode.Position(0,0);
+          eb.replace(new vscode.Range(new vscode.Position(0,0), last), p.proposedContent || '');
+        });
+        try { await p.editor.document.save(); } catch {}
+      } catch {}
+
+      // cleanup decorations and status bar
+      try { p.editor.setDecorations(p.addedDeco, []); } catch {}
+      try { p.editor.setDecorations(p.removedDeco, []); } catch {}
+      try { p.addedDeco.dispose(); } catch {}
+      try { p.removedDeco.dispose(); } catch {}
+      try { p.hoverDeco && p.hoverDeco.dispose(); } catch {}
+      try { p.keepItem && p.keepItem.dispose(); } catch {}
+      try { p.undoItem && p.undoItem.dispose(); } catch {}
+
+      // resolve promise
+      try { p.resolve(true); } catch {}
+      this.pendingWriteProposals.delete(id);
+      return true;
+    } catch (err) {
+      console.error('handleKeepById failed', err);
+      return false;
+    }
+  }
+
+  async handleUndoById(id) {
+    try {
+      if (!this.pendingWriteProposals || !this.pendingWriteProposals.has(id)) return false;
+      const p = this.pendingWriteProposals.get(id);
+      // Restore original buffer
+      try {
+        await p.editor.edit((eb) => {
+          const last = p.editor.document.lineCount > 0 ? p.editor.document.lineAt(p.editor.document.lineCount - 1).range.end : new vscode.Position(0,0);
+          eb.replace(new vscode.Range(new vscode.Position(0,0), last), p.originalBuffer || '');
+        });
+      } catch {}
+
+      // cleanup decorations and status bar
+      try { p.editor.setDecorations(p.addedDeco, []); } catch {}
+      try { p.editor.setDecorations(p.removedDeco, []); } catch {}
+      try { p.addedDeco.dispose(); } catch {}
+      try { p.removedDeco.dispose(); } catch {}
+      try { p.hoverDeco && p.hoverDeco.dispose(); } catch {}
+      try { p.keepItem && p.keepItem.dispose(); } catch {}
+      try { p.undoItem && p.undoItem.dispose(); } catch {}
+
+      try { p.resolve(false); } catch {}
+      this.pendingWriteProposals.delete(id);
+      return true;
+    } catch (err) {
+      console.error('handleUndoById failed', err);
+      return false;
     }
   }
 

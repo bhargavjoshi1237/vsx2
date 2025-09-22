@@ -51,6 +51,21 @@
           "description": "API key for NVIDIA AI models",
           "scope": "application"
         }
+        ,
+        "vsx.apiKey.cerebras": {
+          "type": "string",
+          "default": "",
+          "description": "API key for Cerebras AI models",
+          "scope": "application"
+        }
+        ,
+        "vsx.cerebras.reasoningEffort": {
+          "type": "string",
+          "default": "medium",
+          "description": "Default reasoning effort for Cerebras requests (low, medium, high)",
+          "enum": ["low","medium","high"],
+          "scope": "application"
+        }
       }
     }
   },

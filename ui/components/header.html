@@ -17,13 +17,16 @@
                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><!-- Icon from Google Material Icons by Material Design Authors - https://github.com/material-icons/material-icons/blob/master/LICENSE --><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2s-2 .9-2 2s.9 2 2 2m0 2c-1.1 0-2 .9-2 2s.9 2 2 2s2-.9 2-2s-.9-2-2-2m0 6c-1.1 0-2 .9-2 2s.9 2 2 2s2-.9 2-2s-.9-2-2-2"/></svg>
             </button>
             <!-- Options Dropdown -->
-            <div id="options-dropdown" style="background-color: #2d2d2d;" class="absolute right-0 top-full mt-2 w-48 rounded-lg shadow-xl border border-gray-600 hidden z-50">
+            <div id="options-dropdown" style="background-color: #2d2d2d;" class="absolute right-0 top-full mt-2 w-56 rounded-lg shadow-xl border border-gray-600 hidden z-50">
                 <div class="py-2">
                     <button id="setup-api-keys" class="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600 transition-colors" type="button">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" class="inline mr-2">
                             <path fill="currentColor" d="M7 14c-1.66 0-3 1.34-3 3s1.34 3 3 3s3-1.34 3-3s-1.34-3-3-3M20.5 6c.55 0 1 .45 1 1v3.5c0 .55-.45 1-1 1s-1-.45-1-1V9h-1l-3.99 4.99c-.18.17-.42.26-.68.26c-.26 0-.51-.09-.69-.26L10 10.86l-2.14 2.13c-.37.37-.98.37-1.35 0c-.37-.37-.37-.98 0-1.35l2.83-2.83c.37-.37.98-.37 1.35 0L13 11.14L16.5 7.5H14c-.55 0-1-.45-1-1s.45-1 1-1h5.5z"/>
                         </svg>
                         Setup API Keys
+                    </button>
+                    <button id="set-cerebras-reasoning" class="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600 transition-colors" type="button">
+                        Set Cerebras Reasoning Effort
                     </button>
                 </div>
             </div>
@@ -35,15 +38,38 @@
     const optionsBtn = document.getElementById('options-btn');
     const dropdown = document.getElementById('options-dropdown');
     const settingsBtn = document.getElementById('settings-btn');
+    const newChatBtn = document.getElementById('new-chat-btn');
     if (optionsBtn && dropdown) {
         optionsBtn.addEventListener('click', () => dropdown.classList.toggle('hidden'));
         document.addEventListener('click', (ev) => {
             if (!optionsBtn.contains(ev.target) && !dropdown.contains(ev.target)) dropdown.classList.add('hidden');
         });
     }
-    if (settingsBtn && window.acquireVsCodeApi) {
+    if (newChatBtn) {
+        newChatBtn.addEventListener('click', () => {
+            // Attempt to clear UI locally, then notify extension host to reset state
+            try { if (window.chatUI && typeof window.chatUI.clearMessages === 'function') window.chatUI.clearMessages(); } catch (e) {}
+            try { const vscode = acquireVsCodeApi(); vscode.postMessage({ command: 'newChat' }); } catch (e) {}
+        });
+    }
+    if (settingsBtn) {
         settingsBtn.addEventListener('click', () => {
-            try { const vscode = acquireVsCodeApi(); vscode.postMessage({ command: 'openApiKeySetup' }); } catch (e) {}
+            try { const vscode = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null; if (vscode) vscode.postMessage({ command: 'openApiKeySetup' }); } catch (e) {}
+            try { window.dispatchEvent(new CustomEvent('vsx-openApiKeySetup')); } catch (e) {}
+        });
+    }
+    const setupApiBtn = document.getElementById('setup-api-keys');
+    if (setupApiBtn) {
+        setupApiBtn.addEventListener('click', () => {
+            try { const vscode = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null; if (vscode) vscode.postMessage({ command: 'openApiKeySetup' }); } catch (e) {}
+            try { window.dispatchEvent(new CustomEvent('vsx-openApiKeySetup')); } catch (e) {}
+        });
+    }
+    const cerebrasBtn = document.getElementById('set-cerebras-reasoning');
+    if (cerebrasBtn) {
+        cerebrasBtn.addEventListener('click', () => {
+            try { const vscode = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null; if (vscode) vscode.postMessage({ command: 'setCerebrasReasoning' }); } catch (e) {}
+            try { window.dispatchEvent(new CustomEvent('vsx-setCerebrasReasoning')); } catch (e) {}
         });
     }
 })();

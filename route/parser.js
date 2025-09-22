@@ -17,9 +17,44 @@
 
         if (typeof raw === "string" || (raw.raw && typeof raw.raw === "string")) {
           const sseData = raw.raw || raw;
+
+          // If this string looks like an SSE stream (contains `data: ` lines),
+          // parse it as such. Otherwise try to detect and unwrap simple
+          // `(json\n{...})` wrappers or raw JSON strings and extract the
+          // useful content (user_text or the JSON body) so the UI doesn't
+          // display the wrapper verbatim.
+          if (!sseData.includes("data: ")) {
+            const str = String(sseData).trim();
+
+            // sanitize potential wrapper like `(json\n{...})` or `json\n{...}`
+            const wrapMatch = str.match(/^\(?\s*json\s*\n([\s\S]+)\)?$/i);
+            const candidate = wrapMatch && wrapMatch[1] ? wrapMatch[1].trim() : str;
+
+            // If candidate is JSON, try to parse and extract `user_text`.
+            try {
+              const parsedJson = JSON.parse(candidate);
+              if (parsedJson && typeof parsedJson.user_text === 'string') {
+                out.plain_text = parsedJson.user_text.trim();
+                out.raw = parsedJson;
+                processFileChips(out, options);
+                return out;
+              }
+              // Not a user_text-wrapped object — stringify for display
+              out.plain_text = typeof candidate === 'string' ? candidate : JSON.stringify(parsedJson);
+              out.raw = parsedJson;
+              processFileChips(out, options);
+              return out;
+            } catch {
+              // Not JSON — treat candidate as plain text
+              out.plain_text = candidate;
+              processFileChips(out, options);
+              return out;
+            }
+          }
+
+          // Fallback: treat as SSE stream with `data: ` lines
           const texts = [];
           const thinkingParts = [];
-
           const lines = sseData.split("\n");
           for (const line of lines) {
             if (line.startsWith("data: ") && !line.includes("[DONE]")) {
@@ -113,9 +148,24 @@
 
   function processFileChips(out) {
         if (!out || !out.plain_text) return;
+
+        // Normalize and unwrap provider wrappers such as `(json\n... )` which
+        // some models emit. This makes subsequent JSON parsing and UI display
+        // more reliable.
+        function sanitizePlainText(s) {
+          if (!s || typeof s !== 'string') return s;
+          // Match patterns like `(json\n{...})` or `json\n{...}` (case-insensitive)
+          const m = s.match(/^\(?\s*json\s*\n([\s\S]+)\)?$/i);
+          if (m && m[1]) {
+            return m[1].trim();
+          }
+          return s;
+        }
+
         const chipPattern = /\*\*\*\s*file:\s*([^*]+?)\s*\*\*\*/gi;
         const chips = [];
-        let newText = out.plain_text.replace(chipPattern, (match, p1) => {
+        const sanitized = sanitizePlainText(out.plain_text);
+        let newText = sanitized.replace(chipPattern, (match, p1) => {
           const filename = p1.trim();
           const label = `file: ${filename}`;
           chips.push({ label, filename });
@@ -125,6 +175,9 @@
           out.plain_text = newText.trim();
           out.metadata = out.metadata || {};
           out.metadata.file_chips = chips;
+        } else {
+          // If no chips were replaced, still ensure plain_text is sanitized.
+          out.plain_text = sanitized;
         }
       }
 

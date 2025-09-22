@@ -5,7 +5,7 @@ const legacy = require('./legacy');
 const MODES = [ask, legacy];
 
 function listModes() {
-  return MODES.map(m => ({ id: m.id, name: m.name }));
+  return MODES.map(m => ({ id: m.id, name: m.name, tagline: m.tagline || '' }));
 }
 
 function getModeById(id) {

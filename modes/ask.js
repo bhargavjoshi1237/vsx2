@@ -52,7 +52,9 @@ async function execute({ router, modelId, prompt, requestId }) {
   // Provide the actual raw provider response as `raw` so parsers can inspect it.
   const raw = resp && resp.raw !== undefined ? resp.raw : resp;
 
-  return { text, raw, procedureResult };
+  // Include a `done` flag so the UI knows to hide loading indicators
+  return { text, raw, procedureResult, done: true };
 }
 
-module.exports = { id, name, execute, wrappers };
+const tagline = 'Ask VSX';
+module.exports = { id, name, execute, wrappers, tagline };

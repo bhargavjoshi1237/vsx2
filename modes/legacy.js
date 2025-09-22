@@ -7,20 +7,22 @@ const wrappers = {
     "user_text": "RESPOND TO THE USER HERE, OTHER FIELDS ARE HIDDEN FOR USER",
     "tool_calls": [
       { "tool": "searchfile", "args": { "q": "readme" } },
-      { "tool": "fileread", "args": { "path": "FULL/path/to/file" } }
+      { "tool": "fileread", "args": { "path": "FULL/path/to/file" } },
+      { "tool": "writeFile", "args": { "filePath": "FULL/path/to/file", "content": "NEW FILE CONTENTS HERE" } }
     ],
     "other": ...
   }
 If you need to perform a task, you can use tools by calling them. Supported Tool Calls:
  - \`searchfile\`: search for files in the workspace by name or pattern.
  - \`fileread\`: read one or more files by specifying \`path\`, \`paths\` (array) or \`files\` (array of {\`path\`, label}).
+ - \`writeFile\`: propose changes to a file. Provide \`filePath\` and either \`content\` (string) or \`lines\` (array of lines). The host will display a diff and ask the user to Keep or Undo.
 
 When the assistant calls \`fileread\`, include the precise path(s) you want read. The host will attach file contents and return a \`fileread\` tool response with \`files: [{path, relativePath, content, success}]\`. If the assistant requests file reads, the UI will show a compact widget indicating which files were read and expose their contents to the user.`,
     bottom: "When returning code, prefer plain code blocks and avoid advanced formatting. If unsure, ask for clarification. At the end of your response, always include a concise summary of what was done or found, suitable for the user to read. Keep responses brief and to the point.",
     fileHeader: "Legacy mode: files are provided as context in a simplified format."
 };
 
-async function execute({ router, modelId, prompt }) {
+async function execute({ router, modelId, prompt, requestId, previous_chat_history }) {
   if (!router) throw new Error("Router is required for legacy mode");
 
   // Legacy mode doesn't support procedures. If the prompt includes a 'do:'
@@ -69,6 +71,15 @@ async function execute({ router, modelId, prompt }) {
           return { tool: 'fileread', success: false, error: 'fileread module failed' };
         }
       }
+      if (tool === 'writefile' || tool === 'writeFile' || tool === 'write_file') {
+        try {
+          const writefile = require('../tools/writefile');
+          const res = await writefile(args);
+          return res;
+        } catch {
+          return { tool: 'writefile', success: false, error: 'writefile module failed' };
+        }
+      }
 
       // Unknown tool
       return { tool, success: false, error: 'Unknown tool' };
@@ -108,7 +119,15 @@ async function execute({ router, modelId, prompt }) {
 
   while (iteration < maxIterations) {
     iteration += 1;
-    const resp = await router.sendPrompt(modelId, lastPrompt, id);
+  // On first iteration, ensure we include previous_chat_history (visible chat text)
+  if (iteration === 1 && previous_chat_history && Array.isArray(previous_chat_history) && previous_chat_history.length) {
+    try {
+      const prevJson = JSON.stringify({ previous_chat_history });
+      lastPrompt = (typeof lastPrompt === 'string' ? lastPrompt : JSON.stringify(lastPrompt)) + '\n\n' + prevJson;
+    } catch { }
+  }
+
+  const resp = await router.sendPrompt(modelId, lastPrompt, id, requestId);
     const norm = normalizeResp(resp);
     lastResp = resp;
 
@@ -213,6 +232,10 @@ async function execute({ router, modelId, prompt }) {
       conversation_till_now: conversationField,
       tools_called: toolsCalled,
     };
+    // Also include previous_chat_history on subsequent augmentations if available
+    try {
+      if (previous_chat_history && Array.isArray(previous_chat_history) && previous_chat_history.length) augment.previous_chat_history = previous_chat_history;
+    } catch {}
 
     // Prepare next prompt by appending JSON block
     try {
@@ -242,3 +265,5 @@ async function execute({ router, modelId, prompt }) {
 }
 
 module.exports = { id, name, execute, wrappers };
+const tagline = 'Edit in Legacy';
+module.exports = { id, name, execute, wrappers, tagline };

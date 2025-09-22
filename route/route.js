@@ -1,4 +1,7 @@
 const gemini = require("./geminiclient");
+const nvidia = require("./nvidiaclient");
+let cerebras = null;
+try { cerebras = require('./cerebrasclient'); } catch { cerebras = null; }
 const modes = require("../modes");
 
 function createRouter(context, webviewProvider) {
@@ -66,6 +69,7 @@ function createRouter(context, webviewProvider) {
   async function getModels() {
     let geminiModels = [];
     let nvidiaModels = [];
+    let cerebrasModels = [];
     try {
       if (typeof gemini.getModels === "function")
         geminiModels = gemini.getModels() || [];
@@ -78,12 +82,19 @@ function createRouter(context, webviewProvider) {
     } catch {
       nvidiaModels = [];
     }
+    try {
+      if (cerebras && typeof cerebras.getModels === 'function') cerebrasModels = cerebras.getModels() || [];
+    } catch {
+      cerebrasModels = [];
+    }
 
     const combined = [];
     if (Array.isArray(geminiModels) && geminiModels.length)
       combined.push(...geminiModels);
     if (Array.isArray(nvidiaModels) && nvidiaModels.length)
       combined.push(...nvidiaModels);
+    if (Array.isArray(cerebrasModels) && cerebrasModels.length)
+      combined.push(...cerebrasModels);
     return {
       flatList: combined,
       byId: combined.reduce((acc, m) => {
@@ -102,11 +113,14 @@ function createRouter(context, webviewProvider) {
       if ((modelMeta && modelMeta.provider === 'nvidia') || (!modelMeta && looksLikeNvidia)) {
         return await sendPromptNvidia(modelId, prompt, modeId, requestId);
       }
+      if (modelMeta && modelMeta.provider === 'cerebras') {
+        return await sendPromptCerebras(modelId, prompt, modeId, requestId);
+      }
     } catch {
     }
 
   const apiKey = getApiKey();
-  if (!apiKey) throw new Error("Gemini API key not configured");
+  if (!apiKey) throw new Error("API key not configured");
 
   // build wrapped prompt and log it
   const prepared = buildWrappedPrompt(prompt, modeId);
@@ -153,7 +167,7 @@ function createRouter(context, webviewProvider) {
     const formatted = formatter.formatResponse(resp, modeId, webviewProvider, requestId, modelId);
     return { raw: resp, text, parsed: formatted.parsed, user_text: formatted.user_text };
   }
-  const nvidia = require("./nvidiaclient");
+  
   function getNvidiaApiKey() {
     try {
       const vscode = require("vscode");
@@ -172,7 +186,7 @@ function createRouter(context, webviewProvider) {
     console.log('Prepared prompt for NVIDIA:', prepared);
 
     const parts = Array.isArray(prepared) ? prepared : [prepared];
-  const resp = await nvidia.callNvidia(apiKey, modelId, parts);
+    const resp = await nvidia.callNvidia(apiKey, modelId, parts);
 
   function extractTextFromNvidia(r) {
       try {
@@ -206,6 +220,53 @@ function createRouter(context, webviewProvider) {
 
     const formatter = require('./formatter');
     const formatted = formatter.formatResponse(resp, modeId, webviewProvider, requestId);
+    return { raw: resp, text, parsed: formatted.parsed, user_text: formatted.user_text };
+  }
+
+  function getCerebrasApiKey() {
+    try {
+      const vscode = require('vscode');
+      const key = vscode.workspace.getConfiguration('vsx').get('apiKey.cerebras');
+      return key || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function sendPromptCerebras(modelId, prompt, modeId, requestId) {
+    const apiKey = getCerebrasApiKey();
+    if (!apiKey) throw new Error('Cerebras API key not configured');
+    if (!cerebras) throw new Error('Cerebras client not available');
+    const prepared = buildWrappedPrompt(prompt, modeId);
+    const parts = Array.isArray(prepared) ? prepared : [prepared];
+    // read configured default reasoning effort for Cerebras (low|medium|high)
+    let reasoningEffort;
+    try {
+      const vscode = require('vscode');
+      const cfg = vscode.workspace.getConfiguration('vsx');
+      const pref = cfg.get('cerebras.reasoningEffort');
+      if (pref && (pref === 'low' || pref === 'medium' || pref === 'high')) reasoningEffort = pref;
+    } catch {
+      reasoningEffort = undefined;
+    }
+    const resp = await cerebras.callCerebras(apiKey, modelId, parts, reasoningEffort);
+
+    let text = '';
+    try {
+      if (!resp) text = '';
+      else if (typeof resp === 'string') text = resp;
+      else if (resp.choices && Array.isArray(resp.choices)) {
+        const texts = resp.choices.map(c => (c && c.message && (c.message.content || c.message)) || c.text || '').filter(Boolean);
+        text = texts.join('\n').trim();
+      } else if (resp.output && typeof resp.output === 'string') text = resp.output;
+      else if (resp.raw && typeof resp.raw === 'string') text = resp.raw;
+      else text = JSON.stringify(resp);
+    } catch (e) {
+      text = JSON.stringify(resp);
+    }
+
+    const formatter = require('./formatter');
+    const formatted = formatter.formatResponse(resp, modeId, webviewProvider, requestId, modelId);
     return { raw: resp, text, parsed: formatted.parsed, user_text: formatted.user_text };
   }
 
