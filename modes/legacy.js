@@ -8,7 +8,8 @@ const wrappers = {
     "tool_calls": [
       { "tool": "searchfile", "args": { "q": "readme" } },
       { "tool": "fileread", "args": { "path": "FULL/path/to/file" } },
-      { "tool": "writeFile", "args": { "filePath": "FULL/path/to/file", "content": "NEW FILE CONTENTS HERE" } }
+      { "tool": "writeFile", "args": { "filePath": "FULL/path/to/file", "content": "NEW FILE CONTENTS HERE" } },
+      { "tool": "terminal_command", "args": { "command": "echo Hello from terminal" } }
     ],
     "other": ...
   }
@@ -25,6 +26,26 @@ When the assistant calls \`fileread\`, include the precise path(s) you want read
 async function execute({ router, modelId, prompt, requestId, previous_chat_history }) {
   if (!router) throw new Error("Router is required for legacy mode");
 
+  // Get workspace root for path resolution and prompt augmentation
+  const vscode = require('vscode');
+  const workspaceRoot = vscode.workspace && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0 
+    ? vscode.workspace.workspaceFolders[0].uri.fsPath 
+    : process.cwd();
+
+  // Helper to resolve file path: absolute if starts with /, else relative to workspace root
+  function resolveFilePath(filePath) {
+    try {
+      if (typeof filePath !== 'string' || !filePath.trim()) return null;
+      const trimmed = filePath.trim();
+      if (trimmed.startsWith('/') || trimmed.startsWith('\\') || require('path').isAbsolute(trimmed)) {
+        return trimmed; // Already absolute
+      }
+      return require('path').resolve(workspaceRoot, trimmed); // Resolve relative to workspace
+    } catch {
+      return filePath; // Fallback
+    }
+  }
+
   // Legacy mode doesn't support procedures. If the prompt includes a 'do:'
   // instruction, return a note rather than attempting to run procedures.
   if (typeof prompt === 'string' && /do:\s*/i.test(prompt)) {
@@ -32,6 +53,10 @@ async function execute({ router, modelId, prompt, requestId, previous_chat_histo
     const parts = prompt.split(/do:\s*/i);
     prompt = parts[0].trim();
   }
+
+  // Augment initial prompt with workspace root info so LLM uses correct base path for files/terminals
+  let augmentedPrompt = typeof prompt === 'string' ? prompt : JSON.stringify(prompt);
+  augmentedPrompt = `Current VS Code workspace root directory: ${workspaceRoot}\n\nUse relative paths from this root for file operations (e.g., 'src/main.js' resolves to ${workspaceRoot}/src/main.js). Preserve exact file extensions in paths.\n\nOriginal prompt:\n${augmentedPrompt}`;
 
   // We'll implement a loop: if the assistant's response contains tool calls
   // (a `tool_calls` array in JSON), execute those tools locally and then
@@ -42,7 +67,7 @@ async function execute({ router, modelId, prompt, requestId, previous_chat_histo
 
   const maxIterations = 10;
   let iteration = 0;
-  let lastPrompt = prompt;
+  let lastPrompt = augmentedPrompt;
   let lastResp = null;
   let finalOut = null;
   const collectedTools = [];
@@ -63,6 +88,10 @@ async function execute({ router, modelId, prompt, requestId, previous_chat_histo
         }
       }
       if (tool === 'fileread' || tool === 'fileRead' || tool === 'readfile') {
+        // Resolve paths in args
+        if (args.path) args.path = resolveFilePath(args.path);
+        if (args.paths && Array.isArray(args.paths)) args.paths = args.paths.map(p => resolveFilePath(p));
+        if (args.files && Array.isArray(args.files)) args.files = args.files.map(f => ({ ...f, path: resolveFilePath(f.path) }));
         try {
           const fileread = require('../tools/fileread');
           const res = await fileread(args);
@@ -71,7 +100,21 @@ async function execute({ router, modelId, prompt, requestId, previous_chat_histo
           return { tool: 'fileread', success: false, error: 'fileread module failed' };
         }
       }
+      if (tool === 'terminal_command' || tool === 'terminalcommand' || tool === 'execute_command') {
+        // Default cwd to workspace root if not provided
+        if (!args.cwd) args.cwd = workspaceRoot;
+        else args.cwd = resolveFilePath(args.cwd) || args.cwd;
+        try {
+          const terminal = require('../tools/terminal_command');
+          const res = await terminal(args || {});
+          return res;
+        } catch {
+          return { tool: 'terminal_command', success: false, error: 'terminal_command module failed' };
+        }
+      }
       if (tool === 'writefile' || tool === 'writeFile' || tool === 'write_file') {
+        // Resolve filePath
+        if (args.filePath) args.filePath = resolveFilePath(args.filePath);
         try {
           const writefile = require('../tools/writefile');
           const res = await writefile(args);

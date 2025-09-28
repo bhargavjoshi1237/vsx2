@@ -2,10 +2,17 @@
   "name": "vsx",
   "displayName": "vsx",
   "description": "VSX",
-  "version": "0.0.1",
+  "version": "0.0.36",
+  "publisher": "bhargavjoshi",
   "engines": {
     "vscode": "^1.103.0"
   },
+  "icon": "media/pngico.png",
+    "repository": {
+    "type": "git",
+    "url": "https://github.com/bhargavjoshi1237/vsx.git"
+  },
+  "license": "MIT",
   "categories": [
     "Other"
   ],

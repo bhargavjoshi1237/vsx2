@@ -30,6 +30,12 @@ function createRouter(context, webviewProvider) {
     } catch {
     }
 
+    // Simplify workflow: Add concise tool hint for ask/legacy modes to avoid loops
+    let toolHint = '';
+    if (modeId === 'ask' || modeId === 'legacy') {
+      toolHint = '\n\nUse tools like terminal commands only for essential actions; suggest one step at a time and wait for confirmation.';
+    }
+
     // Support passing files as a special marker: if userPrompt is an array and the
     // last element has a `__files` property, treat it specially so we can prepend
     // a file header and JSON-serialize the files for the model.
@@ -53,7 +59,7 @@ function createRouter(context, webviewProvider) {
       userPrompt = main;
     }
 
-    return `${top}\n\n${userPrompt}\n\n${bottom}`;
+    return `${top}\n\n${userPrompt}${toolHint}\n\n${bottom}`;
   }
 
   function getApiKey() {
@@ -218,8 +224,8 @@ function createRouter(context, webviewProvider) {
 
     const text = extractTextFromNvidia(resp);
 
-    const formatter = require('./formatter');
-    const formatted = formatter.formatResponse(resp, modeId, webviewProvider, requestId);
+  const formatter = require('./formatter');
+  const formatted = formatter.formatResponse(resp, modeId, webviewProvider, requestId, modelId);
     return { raw: resp, text, parsed: formatted.parsed, user_text: formatted.user_text };
   }
 

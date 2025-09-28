@@ -45,7 +45,7 @@ function extractUserTextFromParsed(parsed, raw) {
   return user_text;
 }
 
-function extractToolCallsFromParsed(parsed, raw, webviewProvider, requestId) {
+function extractToolCallsFromParsed(parsed, raw, webviewProvider, requestId, modelId) {
   if (!parsed && !raw) return null;
   let tool_calls = null;
   try {
@@ -80,7 +80,8 @@ function extractToolCallsFromParsed(parsed, raw, webviewProvider, requestId) {
             tool: item.tool || item.name || 'Unknown Tool',
             args: item.args || item.parameters || {},
             index: idx,
-            requestId: requestId || null
+            requestId: requestId || null,
+            modelId: modelId || null
           });
         }
       } catch {
@@ -92,12 +93,12 @@ function extractToolCallsFromParsed(parsed, raw, webviewProvider, requestId) {
   return tool_calls;
 }
 
-function formatResponse(resp, modeId, webviewProvider, requestId) {
+function formatResponse(resp, modeId, webviewProvider, requestId, modelId) {
   try {
     const parser = require('./parser');
     const parsed = parser.parseResponse(resp, { modeId });
     const user_text = extractUserTextFromParsed(parsed, resp);
-    const tool_calls = extractToolCallsFromParsed(parsed, resp, webviewProvider, requestId);
+  const tool_calls = extractToolCallsFromParsed(parsed, resp, webviewProvider, requestId, modelId);
 
     // Send incremental message to webview if user_text is found
     if (user_text && webviewProvider && typeof webviewProvider.sendIncrementalMessage === 'function') {
@@ -113,7 +114,7 @@ function formatResponse(resp, modeId, webviewProvider, requestId) {
     return { parsed, user_text, tool_calls };
   } catch {
     const user_text = extractUserTextFromParsed(null, resp);
-    const tool_calls = extractToolCallsFromParsed(null, resp, webviewProvider, requestId);
+  const tool_calls = extractToolCallsFromParsed(null, resp, webviewProvider, requestId, modelId);
 
     // Send incremental message to webview if user_text is found
     if (user_text && webviewProvider && typeof webviewProvider.sendIncrementalMessage === 'function') {

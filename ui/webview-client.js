@@ -96,7 +96,7 @@
     const m = meta.model || selectedModel || '';
     const mo = meta.mode || selectedMode || '';
     if (!m && !mo) return '';
-    return (`Model: ${m}${m && mo ? ' • ' : ' '}${mo}`).trim();
+    return (`${m}${m && mo ? ' • ' : ' '}${mo}`).trim();
   }
 
   function ensureLoading() {
@@ -369,6 +369,88 @@
     }
   };
 
+  // Autopilot: store state and notify host when toggled
+  const autopilotToggle = document.getElementById('autopilot-toggle');
+  if (autopilotToggle) {
+    autopilotToggle.addEventListener('change', () => {
+      try { if (vscode) vscode.postMessage({ command: 'setAutoPilot', enabled: autopilotToggle.checked }); } catch (e) { console.error('post setAutoPilot failed', e); }
+    });
+  }
+
+  // Helper to create a terminal-command widget inside an assistant message
+  function createTerminalWidget(toolCall) {
+    try {
+      // Wrap in a structure like code-widget-wrapper for consistent margins/width
+      const outerWrapper = document.createElement('div');
+      outerWrapper.className = 'code-widget-wrapper'; // Reuse for alignment
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'terminal-tool-widget';
+      
+      // Initial status message for user approval
+      const status = document.createElement('div');
+      status.className = 'terminal-status';
+      status.textContent = 'Waiting for user approval to run this command...';
+      
+      const command = toolCall.args && toolCall.args.command ? String(toolCall.args.command) : (toolCall.args && toolCall.args.cmd ? String(toolCall.args.cmd) : '');
+      const pre = document.createElement('pre');
+      pre.className = 'terminal-cmd';
+      pre.textContent = command;
+      
+      const controls = document.createElement('div');
+      controls.style.marginTop = '6px';
+      const runBtn = document.createElement('button');
+      runBtn.type = 'button';
+      runBtn.textContent = 'Run';
+      runBtn.className = 'run-btn';
+      const skipBtn = document.createElement('button');
+      skipBtn.type = 'button';
+      skipBtn.textContent = 'Skip';
+      skipBtn.className = 'skip-btn';
+      const out = document.createElement('div');
+      out.className = 'terminal-output';
+      out.textContent = ''; // Initial empty
+
+      controls.appendChild(runBtn);
+      controls.appendChild(skipBtn);
+      if (toolCall && toolCall.requestId) try { wrapper.dataset.requestId = toolCall.requestId; } catch {}
+      wrapper.appendChild(status);
+      wrapper.appendChild(pre);
+      wrapper.appendChild(controls);
+      wrapper.appendChild(out);
+      outerWrapper.appendChild(wrapper);
+
+      // Wire actions
+      runBtn.addEventListener('click', () => {
+        try {
+          status.textContent = 'Running command...';
+          runBtn.disabled = true;
+          skipBtn.disabled = true;
+          if (vscode) vscode.postMessage({ command: 'runTerminalCommand', toolCall, requestId: toolCall.requestId || String(Date.now()) });
+        } catch (e) { 
+          console.error('runTerminalCommand post failed', e); 
+          status.textContent = 'Failed to run command.';
+        }
+      });
+      skipBtn.addEventListener('click', () => {
+        try {
+          status.textContent = 'Command skipped by user.';
+          runBtn.disabled = true;
+          skipBtn.disabled = true;
+          if (vscode) vscode.postMessage({ command: 'skipTerminalCommand', toolCall, requestId: toolCall.requestId || String(Date.now()) });
+        } catch (e) { 
+          console.error('skipTerminalCommand post failed', e); 
+          status.textContent = 'Failed to skip command.';
+        }
+      });
+
+      return { widget: outerWrapper }; // Return outer for consistent styling
+    } catch (e) { 
+      console.error('createTerminalWidget failed', e); 
+      return null; 
+    }
+  }
+
   // Listen for messages from extension host
   window.addEventListener('message', (ev) => {
     const msg = ev.data || {};
@@ -419,6 +501,39 @@
         }
         break;
       }
+        case 'terminalCommandResult': {
+          try {
+            const req = msg.requestId;
+            const output = msg.output || '';
+            // find widget by data-request-id
+            const widget = container.querySelector(`.terminal-tool-widget[data-request-id="${String(req)}"]`);
+            if (widget) {
+              const outEl = widget.querySelector('.terminal-output');
+              const statusEl = widget.querySelector('.terminal-status');
+              if (outEl) outEl.textContent = output;
+              if (statusEl) statusEl.textContent = output ? 'Command completed.' : 'Command completed with no output.';
+            } else {
+              // fallback: append a message
+              appendMessage('assistant', `Command result:\n${output}`, {}, req);
+            }
+          } catch (e) { console.error('terminalCommandResult handler failed', e); }
+          break;
+        }
+        case 'terminalCommandSkipped': {
+          try {
+            const req = msg.requestId;
+            const widget = container.querySelector(`.terminal-tool-widget[data-request-id="${String(req)}"]`);
+            if (widget) {
+              const outEl = widget.querySelector('.terminal-output');
+              const statusEl = widget.querySelector('.terminal-status');
+              if (outEl) outEl.textContent = '';
+              if (statusEl) statusEl.textContent = 'Command skipped by user.';
+            } else {
+              appendMessage('assistant', `User skipped running command.`, {}, req);
+            }
+          } catch (e) { console.error('terminalCommandSkipped handler failed', e); }
+          break;
+        }
       
       case 'setLoading':
         setLoading(Boolean(msg.loading), msg.meta || {});
@@ -451,6 +566,42 @@
           const tc = msg.toolCall || {};
           // If the tool indicates a write operation, forward to host to show diff
           const name = (tc.tool || '').toString().toLowerCase();
+          // Handle terminal_command tool specially
+          if (name === 'terminal_command' || name === 'terminalcommand' || name === 'execute_command') {
+            const requestId = tc.requestId || msg.requestId || String(Date.now());
+            // Check for existing widget to prevent duplicates
+            const existingWidget = container.querySelector(`.terminal-tool-widget[data-request-id="${String(requestId)}"]`);
+            if (existingWidget) {
+              console.debug('[webview-client] Skipping duplicate terminal widget for requestId:', requestId);
+              break;
+            }
+
+            // Find the latest assistant message to attach widget
+            const assistantMsgs = container ? container.querySelectorAll('.assistant-message') : [];
+            const node = assistantMsgs && assistantMsgs.length ? assistantMsgs[assistantMsgs.length - 1] : null;
+            const tcCopy = Object.assign({}, tc);
+            try { tcCopy.requestId = requestId; } catch {}
+            const tw = createTerminalWidget(tcCopy);
+            if (node && tw && tw.widget) {
+              const textEl = node.querySelector('.message-text');
+              if (textEl) textEl.appendChild(tw.widget);
+              // Scroll to show the new widget
+              container.scrollTop = container.scrollHeight;
+            } else if (tw && tw.widget) {
+              const wrapperNode = document.createElement('div'); 
+              wrapperNode.className = 'assistant-message';
+              const meta = document.createElement('div'); 
+              meta.className = 'meta-text'; 
+              wrapperNode.appendChild(meta);
+              const textWrap = document.createElement('div'); 
+              textWrap.className = 'message-text'; 
+              textWrap.appendChild(tw.widget); 
+              wrapperNode.appendChild(textWrap);
+              container.appendChild(wrapperNode);
+              container.scrollTop = container.scrollHeight;
+            }
+            break;
+          }
           if (name === 'writefile' || name === 'write_file' || name.includes('write')) {
             const args = tc.args || {};
             // Common arg names: filePath, path, file, content, newContent
@@ -465,7 +616,43 @@
         } catch (e) { console.error('toolCallNotification handler error', e); }
         break;
       }
+      case 'tool.writeFile.response': {
+        try {
+          const action = msg.action || '';
+          const path = msg.filePath || msg.path || '';
+          if (action === 'autokept') {
+            const added = msg.added || 0;
+            const removed = msg.removed || 0;
+            appendMessage('assistant', `Auto-applied changes to ${path}: +${added} -${removed}`, {}, msg.requestId || null);
+          }
+        } catch (e) { console.error('tool.writeFile.response handler failed', e); }
+        break;
+      }
         
+      case 'autoPilotChanged': {
+        try {
+          const enabled = Boolean(msg.enabled);
+          const toggle = document.getElementById('autopilot-toggle');
+          if (toggle) {
+            toggle.checked = enabled;
+            const track = document.getElementById('autopilot-track');
+            const thumb = document.getElementById('autopilot-thumb');
+            if (track && thumb) {
+              if (enabled) {
+                track.classList.add('bg-blue-600');
+                track.classList.remove('bg-gray-600');
+                thumb.style.transform = 'translateX(20px)';
+              } else {
+                track.classList.remove('bg-blue-600');
+                track.classList.add('bg-gray-600');
+                thumb.style.transform = 'translateX(0)';
+              }
+            }
+          }
+        } catch (e) { console.error('autoPilotChanged handler error', e); }
+        break;
+      }
+      
       default:
         break;
     }
@@ -588,4 +775,4 @@
     });
   }
 
-})(); 
+})();

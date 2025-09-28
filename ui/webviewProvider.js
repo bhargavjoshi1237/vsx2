@@ -103,6 +103,14 @@ class MyWebviewProvider {
       </body>
       </html>
     `;
+    // Set initial autopilot state
+    try {
+      const config = vscode.workspace.getConfiguration('vsx');
+      const enabled = Boolean(config.get('autopilot.enabled') || false);
+      webviewView.webview.postMessage({ command: 'autoPilotChanged', enabled });
+    } catch (e) {
+      console.error('Failed to set initial autopilot state', e);
+    }
     // Provide placeholder resources (iconUri) to webview client
     try { webviewView.webview.postMessage({ command: 'placeholderResources', iconUri: String(iconUri) }); } catch (e) {}
     try {
@@ -294,6 +302,53 @@ class MyWebviewProvider {
               });
             }
             return;
+          case 'setAutoPilot':
+            try {
+              const enabled = Boolean(message.enabled);
+              // store in workspace state for the extension
+              try {
+                const vscode = require('vscode');
+                await vscode.workspace.getConfiguration('vsx').update('autopilot.enabled', enabled, vscode.ConfigurationTarget.Global);
+              } catch {}
+              // notify webview
+              if (this.webviewView && this.webviewView.webview) this.webviewView.webview.postMessage({ command: 'autoPilotChanged', enabled });
+            } catch (e) {}
+            return;
+          case 'runTerminalCommand':
+            try {
+              const toolCall = message.toolCall || {};
+              const requestId = message.requestId || (toolCall && toolCall.requestId) || String(Date.now());
+              const cmd = toolCall.args && (toolCall.args.command || toolCall.args.cmd) ? (toolCall.args.command || toolCall.args.cmd) : '';
+              let cwd = toolCall.args && toolCall.args.cwd ? toolCall.args.cwd : this.getWorkspaceRoot(); // Default to workspace root
+              if (!cmd) {
+                if (this.webviewView && this.webviewView.webview) this.webviewView.webview.postMessage({ command: 'terminalCommandResult', requestId, output: 'No command provided' });
+                return;
+              }
+              // Resolve cwd if relative
+              cwd = this.resolveFilePath(cwd) || cwd;
+              // Execute the command using child_process.exec for convenience
+              const child_process = require('child_process');
+              child_process.exec(cmd, { cwd: cwd, windowsHide: true, maxBuffer: 1024 * 500 }, (err, stdout, stderr) => {
+                const out = (stdout || '').toString();
+                const errOut = (stderr || '').toString();
+                const combined = (out + (errOut ? '\n' + errOut : '')).trim();
+                const outputText = combined.length ? combined : (err ? String(err.message || err) : '');
+                // Send result to webview
+                try { this.webviewView.webview.postMessage({ command: 'terminalCommandResult', requestId, output: outputText }); } catch (e) {}
+                // Notify LLM via incremental message that command finished
+                try { this.sendIncrementalMessage({ command: 'appendChatMessage', role: 'assistant', text: `Terminal command executed. Output:\n${outputText}`, requestId }); } catch (e) {}
+              });
+            } catch (e) {
+              try { this.webviewView.webview.postMessage({ command: 'terminalCommandResult', requestId: message.requestId, output: String(e) }); } catch (err) {}
+            }
+            return;
+          case 'skipTerminalCommand':
+            try {
+              const requestId = message.requestId || (message.toolCall && message.toolCall.requestId) || String(Date.now());
+              try { this.webviewView.webview.postMessage({ command: 'terminalCommandSkipped', requestId }); } catch (e) {}
+              try { this.sendIncrementalMessage({ command: 'appendChatMessage', role: 'assistant', text: 'User skipped running the terminal command.', requestId }); } catch (e) {}
+            } catch (e) {}
+            return;
           case "legacyModeConfirmationResponse":
             this.handleLegacyModeConfirmation(message);
             return;
@@ -311,6 +366,33 @@ class MyWebviewProvider {
       undefined,
       this.context.subscriptions
     );
+  }
+
+  // Get current workspace root (fallback to process.cwd if no workspace)
+  getWorkspaceRoot() {
+    try {
+      if (vscode.workspace && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        return vscode.workspace.workspaceFolders[0].uri.fsPath;
+      }
+      return process.cwd();
+    } catch {
+      return process.cwd();
+    }
+  }
+
+  // Helper to resolve file path: absolute if starts with /, else relative to workspace root
+  resolveFilePath(filePath) {
+    try {
+      const root = this.getWorkspaceRoot();
+      if (typeof filePath !== 'string' || !filePath.trim()) return null;
+      const trimmed = filePath.trim();
+      if (trimmed.startsWith('/') || trimmed.startsWith('\\') || path.isAbsolute(trimmed)) {
+        return trimmed; // Already absolute
+      }
+      return path.resolve(root, trimmed); // Resolve relative to workspace
+    } catch {
+      return filePath; // Fallback
+    }
   }
 
   async openApiKeySetup() {
@@ -747,8 +829,12 @@ class MyWebviewProvider {
   
   async legacyWriteFile(filePath, content) {
     try {
-      fs.writeFileSync(filePath, content, 'utf8');
-      return { success: true, filePath };
+      const resolvedPath = this.resolveFilePath(filePath); // Resolve to workspace
+      // Ensure directory exists (recursive)
+      const dir = path.dirname(resolvedPath);
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+      fs.writeFileSync(resolvedPath, content || '', 'utf8'); // Preserve exact extension from resolvedPath
+      return { success: true, filePath: resolvedPath };
     } catch (error) {
       return { success: false, error: error.message, filePath };
     }
@@ -756,11 +842,15 @@ class MyWebviewProvider {
   
   async legacyCreateFile(filePath, content = '') {
     try {
-      if (fs.existsSync(filePath)) {
-        return { success: false, error: 'File already exists', filePath };
+      const resolvedPath = this.resolveFilePath(filePath); // Resolve to workspace
+      if (fs.existsSync(resolvedPath)) {
+        return { success: false, error: 'File already exists', filePath: resolvedPath };
       }
-      fs.writeFileSync(filePath, content, 'utf8');
-      return { success: true, filePath };
+      // Ensure directory exists (recursive)
+      const dir = path.dirname(resolvedPath);
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+      fs.writeFileSync(resolvedPath, content, 'utf8'); // Preserve exact extension
+      return { success: true, filePath: resolvedPath };
     } catch (error) {
       return { success: false, error: error.message, filePath };
     }
@@ -820,10 +910,12 @@ class MyWebviewProvider {
   
   async legacyExecuteTerminal(command, workingDirectory) {
     try {
+      let cwd = workingDirectory || this.getWorkspaceRoot(); // Default to workspace root
+      cwd = this.resolveFilePath(cwd) || cwd; // Resolve if relative
       // Create a terminal for Legacy Mode
       const terminal = vscode.window.createTerminal({
         name: 'Legacy Mode',
-        cwd: workingDirectory
+        cwd: cwd
       });
       terminal.sendText(command);
       terminal.show();
@@ -841,7 +933,7 @@ class MyWebviewProvider {
       return { 
         success: true, 
         command, 
-        workingDirectory,
+        workingDirectory: cwd,
         output: `Executed: ${command}` // Simulated output
       };
     } catch (error) {
@@ -852,20 +944,68 @@ class MyWebviewProvider {
   // New: handle write-file tool which shows a diff and offers Keep/Undo
   async handleWriteFileTool(filePath, newContent, requestId) {
     try {
-      const originalExists = fs.existsSync(filePath);
-      const originalContent = originalExists ? fs.readFileSync(filePath, 'utf8') : '';
+      const resolvedPath = this.resolveFilePath(filePath); // Resolve to workspace
+      const originalExists = fs.existsSync(resolvedPath);
+      const originalContent = originalExists ? fs.readFileSync(resolvedPath, 'utf8') : '';
+
+      // Check autopilot setting (global workspace config)
+      let autopilot = false;
+      try {
+        const vscode = require('vscode');
+        autopilot = Boolean(vscode.workspace.getConfiguration('vsx').get('autopilot.enabled'));
+      } catch {}
+
+      if (autopilot) {
+        try {
+          // Ensure directory exists
+          try { require('fs').mkdirSync(require('path').dirname(resolvedPath), { recursive: true }); } catch {}
+          fs.writeFileSync(resolvedPath, newContent || '', 'utf8'); // Use resolvedPath to preserve extension
+          // Summarize changes: simple line diff counts
+          const oldLines = (originalContent || '').split(/\r?\n/);
+          const newLines = (newContent || '').split(/\r?\n/);
+          let added = 0, removed = 0;
+          // simple heuristic by comparing lengths and scanning
+          try {
+            const jsdiff = require('diff');
+            const parts = jsdiff.diffLines(originalContent || '', newContent || '');
+            for (const p of parts) {
+              if (p.added) added += String(p.count || (p.value || '').split(/\n/).length).replace(/NaN/, '0') * 1 || ((p.value||'').split(/\n/).length || 0);
+              else if (p.removed) removed += String(p.count || (p.value || '').split(/\n/).length).replace(/NaN/, '0') * 1 || ((p.value||'').split(/\n/).length || 0);
+            }
+          } catch {
+            added = Math.max(0, newLines.length - oldLines.length);
+            removed = Math.max(0, oldLines.length - newLines.length);
+          }
+
+          // Notify webview and caller
+          if (this.webviewView && this.webviewView.webview) {
+            this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId, success: true, action: 'autokept', filePath: resolvedPath, added, removed });
+            this.webviewView.webview.postMessage({ command: 'showNotification', text: `Auto-applied changes to ${resolvedPath}: +${added} -${removed}` });
+          }
+          // Also inform LLM via appendChatMessage
+          try { this.sendIncrementalMessage({ command: 'appendChatMessage', role: 'assistant', text: `Auto-applied changes to ${resolvedPath}: +${added} -${removed}`, requestId }); } catch {}
+          return { success: true, action: 'autokept', filePath: resolvedPath, added, removed };
+        } catch (err) {
+          console.error('autopilot write failed', err);
+          if (this.webviewView && this.webviewView.webview) this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId, success: false, error: String(err) });
+          return { success: false, error: String(err), filePath: resolvedPath };
+        }
+      }
 
     // Show the diff to the user (inline unified diff preview) and wait for action
-    const keep = await this.showDiffAndPrompt(originalContent, newContent || '', filePath, requestId);
+    const keep = await this.showDiffAndPrompt(originalContent, newContent || '', resolvedPath, requestId); // Use resolvedPath
 
     if (keep) {
+      // Apply the write using resolvedPath
+      try { require('fs').mkdirSync(require('path').dirname(resolvedPath), { recursive: true }); } catch {}
+      fs.writeFileSync(resolvedPath, newContent || '', 'utf8');
       // Notify UI that change was kept
-      this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId, success: true, action: 'kept', filePath });
-      return { success: true, action: 'kept', filePath };
+      this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId, success: true, action: 'kept', filePath: resolvedPath });
+      return { success: true, action: 'kept', filePath: resolvedPath };
     } else {
       // Notify UI that change was undone
-      this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId, success: true, action: 'undone', filePath });
-      return { success: true, action: 'undone', filePath };
+      this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId, success: true, action: 'undone', filePath: resolvedPath });
+      return { success: true, action: 'undone', filePath: resolvedPath };
     }
     } catch (error) {
       console.error('handleWriteFileTool error', error);

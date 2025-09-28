@@ -3,8 +3,7 @@
   style="max-height: 1000px; overflow: visible;">
      <div class="w-full flex flex-col justify-between h-full">
         <div class="flex-shrink-0">
-            <div class="flex gap-2">
-                
+            <div class="flex items-center w-full">
                 <div id="attachFileChip"
                     class="border rounded-md mb-1 border-gray-700 h-fit w-fit gap-2 flex pl-2 pr-2 items-center justify-center cursor-pointer">
                     <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
@@ -13,9 +12,19 @@
                             />
                     </svg>
                     <p class="text-[7px] text-[#e7e7e7]">Attach</p>
-                    
                 </div>
-                
+
+                <div class="ml-auto flex gap-4 items-center">
+                    <!-- moved action icons to top row, right-most corner -->
+                    <button class="text-[#e7e7e7]" title="Search">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="m22.61 18.99l-9.08-9.08c.93-2.34.45-5.1-1.44-7C9.79.61 6.21.4 3.66 2.26L7.5 6.11L6.08 7.52L2.25 3.69C.39 6.23.6 9.82 2.9 12.11c1.86 1.86 4.57 2.35 6.89 1.48l9.11 9.11c.39.39 1.02.39 1.41 0l2.3-2.3c.4-.38.4-1.01 0-1.41m-3 1.6l-9.46-9.46c-.61.45-1.29.72-2 .82c-1.36.2-2.79-.21-3.83-1.25C3.37 9.76 2.93 8.5 3 7.26l3.09 3.09l4.24-4.24l-3.09-3.09c1.24-.07 2.49.37 3.44 1.31a4.47 4.47 0 0 1 1.24 3.96a4.35 4.35 0 0 1-.88 1.96l9.45 9.45z"/></svg>
+                    </button>
+                    <button class="text-[#e7e7e7]" title="Send">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M2.01 21L23 12L2.01 3L2 10l15 2l-15 2z"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </div>
         <div class="w-full flex-grow overflow-auto max-h-[700px]">
@@ -67,24 +76,54 @@
                             </li>
                         </ul>
                     </div>
-                </div>
+                                </div>
             </div>
-            <div class="ml-auto flex gap-4 items-center mr-1">
-                <button class="text-[#e7e7e7]">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="m22.61 18.99l-9.08-9.08c.93-2.34.45-5.1-1.44-7C9.79.61 6.21.4 3.66 2.26L7.5 6.11L6.08 7.52L2.25 3.69C.39 6.23.6 9.82 2.9 12.11c1.86 1.86 4.57 2.35 6.89 1.48l9.11 9.11c.39.39 1.02.39 1.41 0l2.3-2.3c.4-.38.4-1.01 0-1.41m-3 1.6l-9.46-9.46c-.61.45-1.29.72-2 .82c-1.36.2-2.79-.21-3.83-1.25C3.37 9.76 2.93 8.5 3 7.26l3.09 3.09l4.24-4.24l-3.09-3.09c1.24-.07 2.49.37 3.44 1.31a4.47 4.47 0 0 1 1.24 3.96a4.35 4.35 0 0 1-.88 1.96l9.45 9.45z"/></svg>
-                </button>
-                <button class="text-[#e7e7e7]">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24">
-                        <path fill="currentColor" d="M2.01 21L23 12L2.01 3L2 10l15 2l-15 2z"></path>
-                    </svg>
-                </button>
-            </div>
+                        <div class="ml-auto flex items-center mr-1">
+                                <label
+                                    for="autopilot-toggle"
+                                    title="Auto Pilot: allow assistant to apply file changes without confirmation"
+                                    class="flex items-center gap-3 cursor-pointer select-none text-sm text-gray-300 hover:text-white"
+                                >
+                                    <div class="relative">
+                                        <input id="autopilot-toggle" type="checkbox" class="sr-only peer" />
+                                        <div id="autopilot-track" class="w-10 h-5 bg-gray-600 rounded-full transition-colors duration-300"></div>
+                                        <div
+                                            id="autopilot-thumb"
+                                            class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-md transition-transform duration-300"
+                                        ></div>
+                                    </div>
+                                      <span class="whitespace-nowrap">Auto&nbsp;Pilot</span>
+                                </label>
+                        </div>
         </div>
     </div>
 </div>
 
 <!-- You need to include Alpine.js for the dropdown to be interactive -->
 <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<script>
+// Add toggle logic for autopilot
+(() => {
+  const input = document.getElementById('autopilot-toggle');
+  const track = document.getElementById('autopilot-track');
+  const thumb = document.getElementById('autopilot-thumb');
+  function updateToggle() {
+    if (input.checked) {
+      track.classList.add('bg-blue-600');
+      track.classList.remove('bg-gray-600');
+      thumb.style.transform = 'translateX(20px)';
+    } else {
+      track.classList.remove('bg-blue-600');
+      track.classList.add('bg-gray-600');
+      thumb.style.transform = 'translateX(0)';
+    }
+  }
+  if (input) {
+    input.addEventListener('change', updateToggle);
+    updateToggle();
+  }
+})();
+</script>
 <script>
 // Autosize textarea while allowing the container to grow until 1000px
 (() => {
