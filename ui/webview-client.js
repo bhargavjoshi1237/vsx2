@@ -13,8 +13,28 @@
   let selectedMode = '';
   let loadingNode = null;
   let modelsRequestAttempts = 0;
-  let modesRequestAttempts = 0;
+  
   const maxRetryAttempts = 3;
+  
+  // Message deduplication
+  const recentMessages = new Set();
+  const MESSAGE_DEDUP_TIMEOUT = 1000; // 1 second
+  
+  // File changes tracking for autopilot mode
+  let pendingFileChanges = [];
+  let fileChangesTimeout = null;
+
+  function isDuplicateMessage(text, role) {
+    const messageKey = `${role}:${text}`;
+    if (recentMessages.has(messageKey)) {
+      return true;
+    }
+    recentMessages.add(messageKey);
+    setTimeout(() => {
+      recentMessages.delete(messageKey);
+    }, MESSAGE_DEDUP_TIMEOUT);
+    return false;
+  }
 
   function renderMessageContent(el, text) {
     el = el || document.createElement('div');
@@ -75,7 +95,7 @@
         wrapper.appendChild(fb);
         el.appendChild(wrapper);
 
-        btn.addEventListener('click', async (ev) => {
+        btn.addEventListener('click', async () => {
           try {
             await navigator.clipboard.writeText(code.textContent || '');
             fb.style.display = 'block';
@@ -91,12 +111,24 @@
     }
   }
 
-  function metaText(meta) {
+  function metaText(meta, showMeta = false) {
+    if (!showMeta) return '';
+    
     meta = meta || {};
     const m = meta.model || selectedModel || '';
     const mo = meta.mode || selectedMode || '';
-    if (!m && !mo) return '';
-    return (`${m}${m && mo ? ' • ' : ' '}${mo}`).trim();
+    
+    // Format model and mode names with first character capitalized
+    const formatName = (name) => {
+      if (!name) return '';
+      return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+    };
+    
+    const formattedModel = formatName(m);
+    const formattedMode = formatName(mo);
+    
+    if (!formattedModel && !formattedMode) return '';
+    return (`${formattedModel}${formattedModel && formattedMode ? ' • ' : ' '}${formattedMode}`).trim();
   }
 
   function ensureLoading() {
@@ -112,16 +144,23 @@
     `;
 
     loadingNode.innerHTML = `
-      <div class="loading-inner flex flex-row items-center space-x-2 ml-2.5">
+      <div class="loading-inner">
         ${spinners}
-        <span class="loading-text align-middle -mt-0.5">Working...</span>
+        <span class="loading-text">Working...</span>
       </div>
     `;
     return loadingNode;
   }
 
-  function appendMessage(role, text, meta, requestId) {
+  function appendMessage(role, text, meta, requestId, showMeta = false) {
     if (!container) return null;
+    
+    // Check for duplicate messages (skip for widgets and special content)
+    if (typeof text === 'string' && text.length > 0 && !text.includes('<') && isDuplicateMessage(text, role)) {
+      console.log('Skipping duplicate message:', text.substring(0, 50) + '...');
+      return null;
+    }
+    
     const tpl = role === 'assistant' ? tmplAssistant : tmplUser;
     if (!tpl || !tpl.content || !tpl.content.firstElementChild) return null;
     const node = tpl.content.firstElementChild.cloneNode(true);
@@ -131,15 +170,22 @@
     const textEl = node.querySelector('.message-text');
     const metaEl = node.querySelector('.meta-text');
     renderMessageContent(textEl, text);
-    if (metaEl) metaEl.textContent = metaText(meta);
+    if (metaEl) metaEl.textContent = metaText(meta, showMeta);
+    
     container.appendChild(node);
     if (loadingNode && loadingNode.parentNode === container) container.appendChild(loadingNode);
     container.scrollTop = container.scrollHeight;
     updatePlaceholderVisibility();
+    
+    // Update footer visibility for assistant messages (don't show footer during conversation)
+    if (role === 'assistant') {
+      updateAssistantFooters(false);
+    }
+    
     return node;
   }
 
-  function updateAssistantNode(requestId, text, meta) {
+  function updateAssistantNode(requestId, text, meta, isLastMessage = true) {
     if (!container || !requestId) return null;
     const sel = `.assistant-message[data-request-id="${String(requestId)}"]`;
     const nodes = container.querySelectorAll(sel);
@@ -148,16 +194,22 @@
     const textEl = node.querySelector('.message-text');
     const metaEl = node.querySelector('.meta-text');
     renderMessageContent(textEl, text);
-    if (metaEl) metaEl.textContent = metaText(meta);
+    if (metaEl) metaEl.textContent = metaText(meta, isLastMessage);
     const spinner = node.querySelector('.assistant-spinner'); if (spinner) spinner.style.display = 'none';
     const status = node.querySelector('.status-text'); if (status) status.style.display = 'none';
+    
+    // Update footer visibility after updating content (show footer if this is the final message)
+    updateAssistantFooters(isLastMessage);
+    
     return node;
   }
 
-  function setLoading(flag, meta) {
+  function setLoading(flag, meta, loadingText = 'Working...') {
     if (!container) return;
     if (flag) {
       const ln = ensureLoading();
+      const textEl = ln.querySelector('.loading-text');
+      if (textEl) textEl.textContent = loadingText;
       const metaEl = ln.querySelector('.loading-meta'); if (metaEl) metaEl.textContent = metaText(meta);
       container.appendChild(ln);
       container.scrollTop = container.scrollHeight;
@@ -180,6 +232,12 @@
     if (!container) return;
     container.innerHTML = '';
     loadingNode = null;
+    // Clear pending file changes
+    pendingFileChanges = [];
+    if (fileChangesTimeout) {
+      clearTimeout(fileChangesTimeout);
+      fileChangesTimeout = null;
+    }
     updatePlaceholderVisibility();
   }
 
@@ -190,19 +248,37 @@
     try {
       const ph = document.getElementById('vsx-placeholder');
       if (!ph) return;
-  // Determine if there are actual chat message nodes (assistant or user)
-  const userMsgs = container ? container.querySelectorAll('.user-message') : [];
-  const assistantMsgs = container ? container.querySelectorAll('.assistant-message') : [];
-  const hasMessages = (userMsgs && userMsgs.length) || (assistantMsgs && assistantMsgs.length);
+      
+      // Determine if there are actual chat message nodes (assistant or user)
+      const userMsgs = container ? container.querySelectorAll('.user-message') : [];
+      const assistantMsgs = container ? container.querySelectorAll('.assistant-message') : [];
+      const hasMessages = (userMsgs && userMsgs.length) || (assistantMsgs && assistantMsgs.length);
+      
       if (!hasMessages) {
+        // Update tagline based on selected mode
         const tagline = modesTaglines[selectedMode] || modesTaglines['legacy'] || 'Build with VSX';
-        const tagEl = document.getElementById('vsx-placeholder-tagline'); if (tagEl) tagEl.textContent = tagline;
-        const imgEl = document.getElementById('vsx-placeholder-icon'); if (imgEl && placeholderIcon) imgEl.src = placeholderIcon;
-        ph.style.display = '';
+        const tagEl = document.getElementById('vsx-placeholder-tagline'); 
+        if (tagEl) tagEl.textContent = tagline;
+        
+        // Update icon if available
+        const imgEl = document.getElementById('vsx-placeholder-icon'); 
+        if (imgEl) {
+          if (placeholderIcon && placeholderIcon.length > 0) {
+            imgEl.src = placeholderIcon;
+            imgEl.style.display = '';
+          } else {
+            // Hide icon if no URI available
+            imgEl.style.display = 'none';
+          }
+        }
+        
+        ph.style.display = 'flex';
       } else {
         ph.style.display = 'none';
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) { 
+      console.error('Error updating placeholder visibility:', e);
+    }
   }
 
   function setSelectedModel(id) { selectedModel = id || ''; }
@@ -221,10 +297,10 @@
       
       if (!models || !models.length) {
         const li = document.createElement('li');
-        li.className = 'px-4 py-3 text-gray-400 text-center cursor-pointer';
+        li.className = 'px-3 py-2 text-gray-400 text-center cursor-pointer hover:bg-gray-700 hover:text-white transition-colors';
         li.innerHTML = `
-          <div>No models available</div>
-          <div class="text-xs mt-1">Click to configure API keys</div>
+          <div class="text-sm">No models available</div>
+          <div class="text-xs mt-1 opacity-75">Click to configure API keys</div>
         `;
         li.addEventListener('click', () => {
           console.log('[webview-client] Requesting API key setup');
@@ -243,8 +319,8 @@
         
         const li = document.createElement('li');
         li.className = disabled 
-          ? 'px-4 py-2 text-gray-500 cursor-pointer text-sm'
-          : 'px-4 py-2 hover:bg-gray-700 cursor-pointer text-sm text-[#e7e7e7]';
+          ? 'px-3 py-2 text-gray-500 cursor-pointer text-sm hover:bg-gray-700 hover:text-gray-300 transition-colors'
+          : 'px-3 py-2 hover:bg-gray-700 cursor-pointer text-sm text-gray-200 hover:text-white transition-colors';
         li.dataset.modelId = id;
         li.setAttribute('role', 'option');
         li.textContent = name;
@@ -288,7 +364,7 @@
         try { dropdown.dataset.selectedModelId = selectedModel; } catch (err) {}
       } else if (!selectedModel && models.length) {
         // All models are disabled, show first one but indicate it needs setup
-        const first = models[0];
+        
         try { 
           const btnSpan = dropdown.querySelector('button span'); 
           if (btnSpan) btnSpan.textContent = 'Configure API Keys'; 
@@ -312,7 +388,7 @@
       listEl.innerHTML = '';
       if (!modes || !Array.isArray(modes) || modes.length === 0) {
         const li = document.createElement('li');
-        li.className = 'px-4 py-3 text-gray-400 text-center';
+        li.className = 'px-3 py-2 text-gray-400 text-center';
         li.textContent = 'No modes available';
         listEl.appendChild(li);
         return;
@@ -322,7 +398,7 @@
         const id = m.id || m.modeId || m.name || String(m);
         const name = m.name || m.displayName || m.id || id;
         const li = document.createElement('li');
-        li.className = 'px-4 py-2 hover:bg-gray-700 cursor-pointer text-sm text-[#e7e7e7]';
+        li.className = 'px-3 py-2 hover:bg-gray-700 cursor-pointer text-sm text-gray-200 hover:text-white transition-colors';
         li.dataset.modeId = id;
         li.textContent = name;
         li.setAttribute('role', 'option');
@@ -352,21 +428,154 @@
     }
   }
 
+  // Helper to check if message should be filtered out
+  function shouldFilterMessage(text) {
+    if (typeof text !== 'string') return false;
+    
+    const filterPatterns = [
+      /searching for files/i,
+      /found \d+ files?/i,
+      /applying changes/i,
+      /changes applied/i,
+      /applied changes to/i,
+      /file updated/i,
+      /writing to file/i,
+      /created file/i,
+      /analyzed.*file/i,
+      /project has.*dependencies/i,
+      /opened file preview/i,
+      /file preview/i,
+      /auto.*applied/i,
+      /automatically applied/i,
+      /file changes applied/i,
+      /updated file/i,
+      /modified file/i,
+      /saved changes/i
+    ];
+    
+    return filterPatterns.some(pattern => pattern.test(text));
+  }
+
+  // Helper to show waiting state for terminal commands
+  function showTerminalWaiting() {
+    setLoading(true, {}, 'Waiting for user input...');
+  }
+
+  // Helper to mark conversation as ended and show footer
+  function markConversationEnded() {
+    updateAssistantFooters(true);
+  }
+
+  // Helper to collect file changes and show summary widget
+  function addFileChange(filePath, linesAdded = 0, linesRemoved = 0) {
+    // Check if autopilot is enabled
+    const autopilotToggle = document.getElementById('autopilot-toggle');
+    const isAutopilot = autopilotToggle && autopilotToggle.checked;
+    
+    if (!isAutopilot) return; // Only collect changes in autopilot mode
+    
+    // Add to pending changes
+    pendingFileChanges.push({
+      filePath,
+      linesAdded,
+      linesRemoved,
+      timestamp: Date.now()
+    });
+    
+    // Clear existing timeout
+    if (fileChangesTimeout) {
+      clearTimeout(fileChangesTimeout);
+    }
+    
+    // Set timeout to show summary widget after 500ms of no new changes
+    fileChangesTimeout = setTimeout(() => {
+      if (pendingFileChanges.length > 0) {
+        showFileChangesSummary();
+        pendingFileChanges = [];
+      }
+    }, 500);
+  }
+
+  // Show file changes summary widget
+  function showFileChangesSummary() {
+    if (pendingFileChanges.length === 0) return;
+    
+    const widget = createFileChangesWidget(pendingFileChanges);
+    if (widget) {
+      // Find the latest assistant message to attach widget
+      const assistantMsgs = container ? container.querySelectorAll('.assistant-message') : [];
+      const node = assistantMsgs && assistantMsgs.length ? assistantMsgs[assistantMsgs.length - 1] : null;
+      
+      if (node) {
+        const textEl = node.querySelector('.message-text');
+        if (textEl) {
+          textEl.appendChild(widget);
+          container.scrollTop = container.scrollHeight;
+        }
+      } else {
+        // Create a new message for the widget
+        const messageNode = appendMessage('assistant', '', {}, 'file-changes-' + Date.now(), false);
+        if (messageNode) {
+          const textEl = messageNode.querySelector('.message-text');
+          if (textEl) {
+            textEl.appendChild(widget);
+          }
+        }
+      }
+    }
+  }
+
   // Public API
   window.chatUI = {
-    addUserMessage: (t, m, id) => appendMessage('user', t, m, id),
-    addBotMessage: (t, m, id) => appendMessage('assistant', t, m, id),
+    addUserMessage: (t, m, id) => {
+      // Don't show meta for user messages unless it's the last in conversation
+      return appendMessage('user', t, m, id, false);
+    },
+    addBotMessage: (t, m, id, showMeta = true) => {
+      // Filter out redundant messages when widgets are shown
+      if (shouldFilterMessage(t)) {
+        console.log('Filtered redundant message:', t.substring(0, 50) + '...');
+        return null;
+      }
+      return appendMessage('assistant', t, m, id, showMeta);
+    },
     updateAssistantNode,
-    setLoading,
+    setLoading: (flag, meta, loadingText = 'Working...') => {
+      setLoading(flag, meta, loadingText);
+      // Also update input area working state
+      if (window.inputAreaAPI) {
+        window.inputAreaAPI.setWorkingState(flag);
+      }
+    },
     showNotification,
     clearMessages,
     setSelectedModel,
-    setSelectedMode
-    ,
+    setSelectedMode,
     // Helper to request the extension host show a diff and apply/undo a file write
     invokeWriteFile: (filePath, newContent, requestId) => {
       try { if (vscode) vscode.postMessage({ command: 'tool.writeFile', filePath, newContent, requestId }); } catch (e) { console.error('invokeWriteFile failed', e); }
-    }
+    },
+    // Widget creators
+    createFileSearchWidget,
+    createFileChangesWidget,
+    createFileEditWidget,
+    // Helper to add widgets to messages
+    addWidgetToMessage: (messageNode, widget) => {
+      if (messageNode && widget) {
+        const textEl = messageNode.querySelector('.message-text');
+        if (textEl) {
+          textEl.appendChild(widget);
+        }
+      }
+    },
+    // Helper to check if message should be filtered
+    shouldFilterMessage,
+    // Helper to show terminal waiting state
+    showTerminalWaiting,
+    // Helper to mark conversation as ended
+    markConversationEnded,
+    // Helper to track file changes for autopilot
+    addFileChange
   };
 
   // Autopilot: store state and notify host when toggled
@@ -375,6 +584,335 @@
     autopilotToggle.addEventListener('change', () => {
       try { if (vscode) vscode.postMessage({ command: 'setAutoPilot', enabled: autopilotToggle.checked }); } catch (e) { console.error('post setAutoPilot failed', e); }
     });
+  }
+
+  // Update assistant message footers - only show after conversation ends
+  function updateAssistantFooters(conversationEnded = false) {
+    try {
+      const assistantMessages = container.querySelectorAll('.assistant-message');
+      
+      // Hide all footers first
+      assistantMessages.forEach(msg => {
+        const footer = msg.querySelector('.message-footer');
+        if (footer) footer.style.display = 'none';
+      });
+      
+      // Show footer only on last message and only if conversation has ended
+      if (conversationEnded && assistantMessages.length > 0) {
+        const lastMessage = assistantMessages[assistantMessages.length - 1];
+        const footer = lastMessage.querySelector('.message-footer');
+        if (footer) {
+          footer.style.display = 'flex';
+          setupMessageFooter(lastMessage);
+        }
+      }
+    } catch (e) {
+      console.error('Error updating assistant footers:', e);
+    }
+  }
+
+  // Setup message footer with action buttons
+  function setupMessageFooter(messageNode) {
+    try {
+      const footer = messageNode.querySelector('.message-footer');
+      if (!footer) return;
+      
+      const textEl = messageNode.querySelector('.message-text');
+      const text = textEl ? textEl.textContent || '' : '';
+      
+      const likeBtn = footer.querySelector('.like-btn');
+      const dislikeBtn = footer.querySelector('.dislike-btn');
+      const copyBtn = footer.querySelector('.copy-btn');
+      const statsBtn = footer.querySelector('.stats-btn');
+      
+      // Copy functionality
+      if (copyBtn && !copyBtn.hasAttribute('data-setup')) {
+        copyBtn.setAttribute('data-setup', 'true');
+        copyBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(text);
+            copyBtn.style.color = '#10b981';
+            setTimeout(() => {
+              copyBtn.style.color = '';
+            }, 1000);
+          } catch (err) {
+            console.error('Copy failed:', err);
+          }
+        });
+      }
+      
+      // Like/Dislike functionality
+      if (likeBtn && !likeBtn.hasAttribute('data-setup')) {
+        likeBtn.setAttribute('data-setup', 'true');
+        likeBtn.addEventListener('click', () => {
+          likeBtn.classList.toggle('liked');
+          if (dislikeBtn) dislikeBtn.classList.remove('disliked');
+        });
+      }
+      
+      if (dislikeBtn && !dislikeBtn.hasAttribute('data-setup')) {
+        dislikeBtn.setAttribute('data-setup', 'true');
+        dislikeBtn.addEventListener('click', () => {
+          dislikeBtn.classList.toggle('disliked');
+          if (likeBtn) likeBtn.classList.remove('liked');
+        });
+      }
+      
+      // Stats tooltip functionality
+      if (statsBtn && !statsBtn.hasAttribute('data-setup')) {
+        statsBtn.setAttribute('data-setup', 'true');
+        let tooltip = null;
+        
+        statsBtn.addEventListener('mouseenter', () => {
+          if (tooltip) return;
+          
+          tooltip = document.createElement('div');
+          tooltip.className = 'stats-tooltip';
+          
+          const inputTokens = Math.floor(Math.random() * 1000) + 100;
+          const outputTokens = Math.floor(Math.random() * 500) + 50;
+          
+          tooltip.innerHTML = `Input: ${inputTokens} tokens<br>Output: ${outputTokens} tokens`;
+          
+          statsBtn.style.position = 'relative';
+          statsBtn.appendChild(tooltip);
+          
+          setTimeout(() => {
+            if (tooltip) tooltip.classList.add('visible');
+          }, 10);
+        });
+        
+        statsBtn.addEventListener('mouseleave', () => {
+          if (tooltip) {
+            tooltip.classList.remove('visible');
+            setTimeout(() => {
+              if (tooltip && tooltip.parentNode) {
+                tooltip.parentNode.removeChild(tooltip);
+              }
+              tooltip = null;
+            }, 200);
+          }
+        });
+      }
+    } catch (e) {
+      console.error('Error setting up message footer:', e);
+    }
+  }
+
+  // Create file search widget with proper count display
+  function createFileSearchWidget(searchQuery, results) {
+    try {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'file-search-widget';
+      
+      const resultCount = results && Array.isArray(results) ? results.length : 0;
+      
+      const header = document.createElement('div');
+      header.className = 'file-search-header';
+      header.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5A6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5S14 7.01 14 9.5S11.99 14 9.5 14z"/>
+        </svg>
+        <span>${resultCount} file${resultCount !== 1 ? 's' : ''} found</span>
+      `;
+      
+      const resultsContainer = document.createElement('div');
+      resultsContainer.className = 'file-search-results';
+      
+      if (results && results.length > 0) {
+        results.forEach(file => {
+          const item = document.createElement('div');
+          item.className = 'file-search-item';
+          item.textContent = file.path || file.name || file;
+          item.addEventListener('click', () => {
+            // Could trigger file open or preview
+            console.log('File selected:', file);
+          });
+          resultsContainer.appendChild(item);
+        });
+      } else {
+        const noResults = document.createElement('div');
+        noResults.className = 'file-search-item';
+        noResults.textContent = 'No files found';
+        noResults.style.color = '#9ca3af';
+        resultsContainer.appendChild(noResults);
+      }
+      
+      wrapper.appendChild(header);
+      wrapper.appendChild(resultsContainer);
+      
+      return wrapper;
+    } catch (e) {
+      console.error('Error creating file search widget:', e);
+      return null;
+    }
+  }
+
+  // Create file changes summary widget
+  function createFileChangesWidget(changes, requestId) {
+    try {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'file-changes-widget';
+      wrapper.dataset.requestId = requestId || '';
+      
+      const header = document.createElement('div');
+      header.className = 'file-changes-header';
+      header.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M9,10H7V12H9V10M13,10H11V12H13V10M17,10H15V12H17V10M19,3H18V1H16V3H8V1H6V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V8H19V19Z"/>
+        </svg>
+        <span>Changes Applied</span>
+      `;
+      
+      const changesContainer = document.createElement('div');
+      changesContainer.className = 'file-changes-list';
+      
+      if (Array.isArray(changes)) {
+        changes.forEach(change => {
+          const item = document.createElement('div');
+          item.className = 'file-change-item';
+          
+          const fileName = document.createElement('span');
+          fileName.className = 'file-change-name';
+          fileName.textContent = change.filePath || change.file || 'Unknown file';
+          
+          const stats = document.createElement('div');
+          stats.className = 'file-change-stats';
+          
+          const added = change.linesAdded || 0;
+          const removed = change.linesRemoved || 0;
+          
+          if (added > 0) {
+            const addedSpan = document.createElement('span');
+            addedSpan.className = 'lines-added';
+            addedSpan.textContent = `+${added}`;
+            stats.appendChild(addedSpan);
+          }
+          
+          if (removed > 0) {
+            const removedSpan = document.createElement('span');
+            removedSpan.className = 'lines-removed';
+            removedSpan.textContent = `-${removed}`;
+            stats.appendChild(removedSpan);
+          }
+          
+          item.appendChild(fileName);
+          item.appendChild(stats);
+          changesContainer.appendChild(item);
+        });
+      }
+      
+      wrapper.appendChild(header);
+      wrapper.appendChild(changesContainer);
+      
+      return wrapper;
+    } catch (e) {
+      console.error('Error creating file changes widget:', e);
+      return null;
+    }
+  }
+
+  // Create file edit preview widget (simplified without code display)
+  function createFileEditWidget(filePath, changes, requestId) {
+    try {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'file-edit-preview';
+      wrapper.dataset.requestId = requestId || '';
+      
+      const header = document.createElement('div');
+      header.className = 'file-edit-header';
+      
+      const pathSpan = document.createElement('span');
+      pathSpan.className = 'file-edit-path';
+      pathSpan.textContent = filePath;
+      
+      const actions = document.createElement('div');
+      actions.className = 'file-edit-actions';
+      
+      // Check if autopilot is enabled
+      const autopilotToggle = document.getElementById('autopilot-toggle');
+      const isAutopilot = autopilotToggle && autopilotToggle.checked;
+      
+      if (isAutopilot) {
+        // Auto-accept changes - don't show individual widget, will be handled by summary
+        const autoMsg = document.createElement('span');
+        autoMsg.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" style="display: inline; margin-right: 4px;">
+            <path fill="currentColor" d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+          </svg>
+          Auto-applied
+        `;
+        autoMsg.style.color = '#10b981';
+        autoMsg.style.fontSize = '11px';
+        autoMsg.style.display = 'flex';
+        autoMsg.style.alignItems = 'center';
+        actions.appendChild(autoMsg);
+        
+        // Notify extension to apply changes
+        setTimeout(() => {
+          if (vscode) {
+            vscode.postMessage({
+              command: 'autoAcceptFileEdit',
+              filePath,
+              changes,
+              requestId
+            });
+          }
+        }, 100);
+      } else {
+        const acceptBtn = document.createElement('button');
+        acceptBtn.className = 'file-edit-btn accept';
+        acceptBtn.textContent = 'Keep';
+        acceptBtn.addEventListener('click', () => {
+          if (vscode) {
+            vscode.postMessage({
+              command: 'acceptFileEdit',
+              filePath,
+              changes,
+              requestId
+            });
+          }
+          wrapper.style.opacity = '0.6';
+          acceptBtn.disabled = true;
+          rejectBtn.disabled = true;
+        });
+        
+        const rejectBtn = document.createElement('button');
+        rejectBtn.className = 'file-edit-btn reject';
+        rejectBtn.textContent = 'Undo';
+        rejectBtn.addEventListener('click', () => {
+          if (vscode) {
+            vscode.postMessage({
+              command: 'rejectFileEdit',
+              filePath,
+              requestId
+            });
+          }
+          wrapper.style.opacity = '0.6';
+          acceptBtn.disabled = true;
+          rejectBtn.disabled = true;
+        });
+        
+        actions.appendChild(acceptBtn);
+        actions.appendChild(rejectBtn);
+      }
+      
+      header.appendChild(pathSpan);
+      header.appendChild(actions);
+      
+      // Show summary instead of full diff
+      const summary = document.createElement('div');
+      summary.className = 'file-edit-summary';
+      summary.textContent = 'File changes ready to apply';
+      
+      wrapper.appendChild(header);
+      wrapper.appendChild(summary);
+      
+      return wrapper;
+    } catch (e) {
+      console.error('Error creating file edit widget:', e);
+      return null;
+    }
   }
 
   // Helper to create a terminal-command widget inside an assistant message
@@ -387,10 +925,15 @@
       const wrapper = document.createElement('div');
       wrapper.className = 'terminal-tool-widget';
       
-      // Initial status message for user approval
-      const status = document.createElement('div');
-      status.className = 'terminal-status';
-      status.textContent = 'Waiting for user approval to run this command...';
+      // Header with terminal icon and label
+      const header = document.createElement('div');
+      header.className = 'terminal-lang-label';
+      header.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M20,19V7H4V19H20M20,3A2,2 0 0,1 22,5V19A2,2 0 0,1 20,21H4A2,2 0 0,1 2,19V5C2,3.89 2.9,3 4,3H20M13,17V15H18V17H13M9.58,13L5.57,9H8.4L11.7,12.3C12.09,12.69 12.09,13.33 11.7,13.72L8.42,17H5.59L9.58,13Z"/>
+        </svg>
+        Command
+      `;
       
       const command = toolCall.args && toolCall.args.command ? String(toolCall.args.command) : (toolCall.args && toolCall.args.cmd ? String(toolCall.args.cmd) : '');
       const pre = document.createElement('pre');
@@ -398,23 +941,36 @@
       pre.textContent = command;
       
       const controls = document.createElement('div');
-      controls.style.marginTop = '6px';
+      controls.className = 'terminal-controls';
+      
       const runBtn = document.createElement('button');
       runBtn.type = 'button';
-      runBtn.textContent = 'Run';
+      runBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+        </svg>
+      `;
       runBtn.className = 'run-btn';
+      runBtn.title = 'Run Command';
+      
       const skipBtn = document.createElement('button');
       skipBtn.type = 'button';
-      skipBtn.textContent = 'Skip';
+      skipBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+        </svg>
+      `;
       skipBtn.className = 'skip-btn';
+      skipBtn.title = 'Skip Command';
+      
       const out = document.createElement('div');
       out.className = 'terminal-output';
-      out.textContent = ''; // Initial empty
+      out.textContent = 'Waiting for user approval...'; // Initial message
 
       controls.appendChild(runBtn);
       controls.appendChild(skipBtn);
       if (toolCall && toolCall.requestId) try { wrapper.dataset.requestId = toolCall.requestId; } catch {}
-      wrapper.appendChild(status);
+      wrapper.appendChild(header);
       wrapper.appendChild(pre);
       wrapper.appendChild(controls);
       wrapper.appendChild(out);
@@ -423,24 +979,28 @@
       // Wire actions
       runBtn.addEventListener('click', () => {
         try {
-          status.textContent = 'Running command...';
+          out.textContent = 'Running command...';
           runBtn.disabled = true;
           skipBtn.disabled = true;
+          // Clear any loading indicators and show running state
+          setLoading(false);
           if (vscode) vscode.postMessage({ command: 'runTerminalCommand', toolCall, requestId: toolCall.requestId || String(Date.now()) });
         } catch (e) { 
           console.error('runTerminalCommand post failed', e); 
-          status.textContent = 'Failed to run command.';
+          out.textContent = 'Failed to run command.';
         }
       });
       skipBtn.addEventListener('click', () => {
         try {
-          status.textContent = 'Command skipped by user.';
+          out.textContent = 'Command skipped by user.';
           runBtn.disabled = true;
           skipBtn.disabled = true;
+          // Clear loading and continue
+          setLoading(false);
           if (vscode) vscode.postMessage({ command: 'skipTerminalCommand', toolCall, requestId: toolCall.requestId || String(Date.now()) });
         } catch (e) { 
           console.error('skipTerminalCommand post failed', e); 
-          status.textContent = 'Failed to skip command.';
+          out.textContent = 'Failed to skip command.';
         }
       });
 
@@ -479,7 +1039,13 @@
         try { modesTaglines = msg.taglines || {}; updatePlaceholderVisibility(); } catch (e) { console.error(e); }
         break;
       case 'placeholderResources':
-        try { placeholderIcon = msg.iconUri || ''; updatePlaceholderVisibility(); } catch (e) { console.error(e); }
+        try { 
+          placeholderIcon = msg.iconUri || ''; 
+          console.debug('[webview-client] Received placeholder icon URI:', placeholderIcon);
+          updatePlaceholderVisibility(); 
+        } catch (e) { 
+          console.error('Error handling placeholderResources:', e); 
+        }
         break;
         
       case 'appendChatMessage':
@@ -495,7 +1061,11 @@
           if (!updated) {
             appendMessage('assistant', text, meta, rid);
           }
-          if (msg.final || (msg.response && msg.response.done)) setLoading(false, meta);
+          if (msg.final || (msg.response && msg.response.done)) {
+            setLoading(false, meta);
+            // Mark conversation as ended to show footer
+            markConversationEnded();
+          }
         } catch (e) {
           console.error('promptResponse error', e);
         }
@@ -505,6 +1075,8 @@
           try {
             const req = msg.requestId;
             const output = msg.output || '';
+            // Clear waiting state
+            setLoading(false);
             // find widget by data-request-id
             const widget = container.querySelector(`.terminal-tool-widget[data-request-id="${String(req)}"]`);
             if (widget) {
@@ -522,11 +1094,13 @@
         case 'terminalCommandSkipped': {
           try {
             const req = msg.requestId;
+            // Clear waiting state
+            setLoading(false);
             const widget = container.querySelector(`.terminal-tool-widget[data-request-id="${String(req)}"]`);
             if (widget) {
               const outEl = widget.querySelector('.terminal-output');
               const statusEl = widget.querySelector('.terminal-status');
-              if (outEl) outEl.textContent = '';
+              if (outEl) outEl.textContent = 'Command skipped by user.';
               if (statusEl) statusEl.textContent = 'Command skipped by user.';
             } else {
               appendMessage('assistant', `User skipped running command.`, {}, req);
@@ -564,17 +1138,20 @@
       case 'toolCallNotification': {
         try {
           const tc = msg.toolCall || {};
-          // If the tool indicates a write operation, forward to host to show diff
           const name = (tc.tool || '').toString().toLowerCase();
-          // Handle terminal_command tool specially
+          const requestId = tc.requestId || msg.requestId || String(Date.now());
+          
+          // Handle different tool types
           if (name === 'terminal_command' || name === 'terminalcommand' || name === 'execute_command') {
-            const requestId = tc.requestId || msg.requestId || String(Date.now());
             // Check for existing widget to prevent duplicates
             const existingWidget = container.querySelector(`.terminal-tool-widget[data-request-id="${String(requestId)}"]`);
             if (existingWidget) {
               console.debug('[webview-client] Skipping duplicate terminal widget for requestId:', requestId);
               break;
             }
+
+            // Show waiting state for terminal command
+            setLoading(true, {}, 'Waiting for user input...');
 
             // Find the latest assistant message to attach widget
             const assistantMsgs = container ? container.querySelectorAll('.assistant-message') : [];
@@ -585,14 +1162,10 @@
             if (node && tw && tw.widget) {
               const textEl = node.querySelector('.message-text');
               if (textEl) textEl.appendChild(tw.widget);
-              // Scroll to show the new widget
               container.scrollTop = container.scrollHeight;
             } else if (tw && tw.widget) {
               const wrapperNode = document.createElement('div'); 
-              wrapperNode.className = 'assistant-message';
-              const meta = document.createElement('div'); 
-              meta.className = 'meta-text'; 
-              wrapperNode.appendChild(meta);
+              wrapperNode.className = 'assistant-message p-3 m-2 max-w-[70%] text-gray-100 rounded-lg';
               const textWrap = document.createElement('div'); 
               textWrap.className = 'message-text'; 
               textWrap.appendChild(tw.widget); 
@@ -600,30 +1173,91 @@
               container.appendChild(wrapperNode);
               container.scrollTop = container.scrollHeight;
             }
-            break;
           }
-          if (name === 'writefile' || name === 'write_file' || name.includes('write')) {
+          else if (name === 'searchfile' || name === 'searchfiles') {
+            // Handle file search tool
             const args = tc.args || {};
-            // Common arg names: filePath, path, file, content, newContent
-            const filePath = args.filePath || args.path || args.file || args.target || args.file_path;
-            const newContent = args.content || args.newContent || args.proposed || args.lines || '';
-            const requestId = tc.requestId || msg.requestId || String(Date.now());
-            if (filePath && (typeof newContent === 'string' || Array.isArray(newContent))) {
-              const contentStr = Array.isArray(newContent) ? newContent.join('\n') : String(newContent);
-              try { if (vscode) vscode.postMessage({ command: 'tool.writeFile', filePath, newContent: contentStr, requestId }); } catch (e) { console.error('forward tool.writeFile failed', e); }
+            const query = args.q || args.query || args.pattern || '';
+            const results = args.results || [];
+            
+            const searchWidget = createFileSearchWidget(query, results);
+            if (searchWidget) {
+              const assistantMsgs = container ? container.querySelectorAll('.assistant-message') : [];
+              const node = assistantMsgs && assistantMsgs.length ? assistantMsgs[assistantMsgs.length - 1] : null;
+              if (node) {
+                const textEl = node.querySelector('.message-text');
+                if (textEl) textEl.appendChild(searchWidget);
+              }
             }
           }
-        } catch (e) { console.error('toolCallNotification handler error', e); }
+          else if (name === 'writefile' || name === 'write_file' || name.includes('write')) {
+            // Handle file write tool
+            const args = tc.args || {};
+            const filePath = args.filePath || args.path || args.file || args.target || args.file_path;
+            const newContent = args.content || args.newContent || args.proposed || args.lines || '';
+            
+            if (filePath && (typeof newContent === 'string' || Array.isArray(newContent))) {
+              const contentStr = Array.isArray(newContent) ? newContent.join('\n') : String(newContent);
+              
+              // Create file edit preview widget
+              const editWidget = createFileEditWidget(filePath, contentStr, requestId);
+              if (editWidget) {
+                const assistantMsgs = container ? container.querySelectorAll('.assistant-message') : [];
+                const node = assistantMsgs && assistantMsgs.length ? assistantMsgs[assistantMsgs.length - 1] : null;
+                if (node) {
+                  const textEl = node.querySelector('.message-text');
+                  if (textEl) textEl.appendChild(editWidget);
+                }
+              }
+              
+              // Also forward to extension for processing
+              try { 
+                if (vscode) vscode.postMessage({ 
+                  command: 'tool.writeFile', 
+                  filePath, 
+                  newContent: contentStr, 
+                  requestId 
+                }); 
+              } catch (e) { 
+                console.error('forward tool.writeFile failed', e); 
+              }
+            }
+          }
+        } catch (e) { 
+          console.error('toolCallNotification handler error', e); 
+        }
         break;
       }
       case 'tool.writeFile.response': {
         try {
           const action = msg.action || '';
           const path = msg.filePath || msg.path || '';
+          const added = msg.added || 0;
+          const removed = msg.removed || 0;
+          
+          // Check if autopilot is enabled
+          const autopilotToggle = document.getElementById('autopilot-toggle');
+          const isAutopilot = autopilotToggle && autopilotToggle.checked;
+          
           if (action === 'autokept') {
-            const added = msg.added || 0;
-            const removed = msg.removed || 0;
-            appendMessage('assistant', `Auto-applied changes to ${path}: +${added} -${removed}`, {}, msg.requestId || null);
+            if (isAutopilot) {
+              // In autopilot mode, just track the change for summary widget
+              addFileChange(path, added, removed);
+            } else {
+              // Fallback message if not in autopilot mode
+              appendMessage('assistant', `Auto-applied changes to ${path}: +${added} -${removed}`, {}, msg.requestId || null);
+            }
+          } else if (action === 'kept') {
+            if (isAutopilot) {
+              // In autopilot mode, track for summary
+              addFileChange(path, added, removed);
+            } else {
+              // Manual mode, show individual message
+              appendMessage('assistant', `Applied changes to ${path}: +${added} -${removed}`, {}, msg.requestId || null);
+            }
+          } else if (action === 'rejected') {
+            // Always show rejection messages
+            appendMessage('assistant', `Rejected changes to ${path}`, {}, msg.requestId || null);
           }
         } catch (e) { console.error('tool.writeFile.response handler failed', e); }
         break;

@@ -112,7 +112,14 @@ class MyWebviewProvider {
       console.error('Failed to set initial autopilot state', e);
     }
     // Provide placeholder resources (iconUri) to webview client
-    try { webviewView.webview.postMessage({ command: 'placeholderResources', iconUri: String(iconUri) }); } catch (e) {}
+    try { 
+      webviewView.webview.postMessage({ 
+        command: 'placeholderResources', 
+        iconUri: String(iconUri) 
+      }); 
+    } catch (e) {
+      console.error('Failed to send placeholder resources:', e);
+    }
     try {
       this.router = routerFactory ? routerFactory(this.context, this) : null;
     } catch (err) {
@@ -157,10 +164,21 @@ class MyWebviewProvider {
               if (this.webviewView) {
                 this.webviewView.webview.postMessage({ command: 'newChat' });
                 this.webviewView.webview.postMessage({ command: 'clearWorkingStatus' });
+                
+                // Re-send placeholder resources to ensure icon shows up
+                const iconPathOnDisk = vscode.Uri.file(path.join(this.context.extensionUri.fsPath, 'media', 'icon.svg'));
+                const iconUri = this.webviewView.webview.asWebviewUri(iconPathOnDisk);
+                this.webviewView.webview.postMessage({ 
+                  command: 'placeholderResources', 
+                  iconUri: String(iconUri) 
+                });
               }
             } catch (err) {
               console.error('Error handling newChat', err);
             }
+            return;
+          case "selectFiles":
+            this.selectFiles();
             return;
           case "openFilePicker":
             this.openWorkspaceFilePicker();
@@ -335,8 +353,7 @@ class MyWebviewProvider {
                 const outputText = combined.length ? combined : (err ? String(err.message || err) : '');
                 // Send result to webview
                 try { this.webviewView.webview.postMessage({ command: 'terminalCommandResult', requestId, output: outputText }); } catch (e) {}
-                // Notify LLM via incremental message that command finished
-                try { this.sendIncrementalMessage({ command: 'appendChatMessage', role: 'assistant', text: `Terminal command executed. Output:\n${outputText}`, requestId }); } catch (e) {}
+                // Don't send incremental message - let the conversation continue naturally
               });
             } catch (e) {
               try { this.webviewView.webview.postMessage({ command: 'terminalCommandResult', requestId: message.requestId, output: String(e) }); } catch (err) {}
@@ -346,7 +363,7 @@ class MyWebviewProvider {
             try {
               const requestId = message.requestId || (message.toolCall && message.toolCall.requestId) || String(Date.now());
               try { this.webviewView.webview.postMessage({ command: 'terminalCommandSkipped', requestId }); } catch (e) {}
-              try { this.sendIncrementalMessage({ command: 'appendChatMessage', role: 'assistant', text: 'User skipped running the terminal command.', requestId }); } catch (e) {}
+              // Don't send incremental message - let the conversation continue naturally
             } catch (e) {}
             return;
           case "legacyModeConfirmationResponse":
@@ -359,6 +376,21 @@ class MyWebviewProvider {
             } catch (err) {
               console.error('Error handling tool.writeFile', err);
               this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId: message.requestId, success: false, error: String(err) });
+            }
+            return;
+          case 'autoAcceptFileEdit':
+          case 'acceptFileEdit':
+            try {
+              await this.handleAcceptFileEdit(message.filePath, message.changes, message.requestId, message.command === 'autoAcceptFileEdit');
+            } catch (err) {
+              console.error('Error handling acceptFileEdit', err);
+            }
+            return;
+          case 'rejectFileEdit':
+            try {
+              await this.handleRejectFileEdit(message.filePath, message.requestId);
+            } catch (err) {
+              console.error('Error handling rejectFileEdit', err);
             }
             return;
         }
@@ -547,6 +579,36 @@ class MyWebviewProvider {
         client: client,
         apiKey: null,
       });
+    }
+  }
+
+  async selectFiles() {
+    try {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectMany: true,
+        canSelectFiles: true,
+        canSelectFolders: false,
+        openLabel: 'Select Files',
+        filters: {
+          'All Files': ['*']
+        }
+      });
+      
+      if (uris && uris.length > 0) {
+        const filesData = uris.map((uri) => ({
+          path: uri.fsPath,
+          name: path.basename(uri.fsPath),
+          content: this.safeRead(uri.fsPath, "")
+        }));
+        
+        this.webviewView.webview.postMessage({
+          command: "filesSelected",
+          files: filesData,
+        });
+      }
+    } catch (err) {
+      console.error("Error selecting files", err);
+      vscode.window.showErrorMessage(`Error selecting files: ${err.message}`);
     }
   }
 
@@ -980,10 +1042,8 @@ class MyWebviewProvider {
           // Notify webview and caller
           if (this.webviewView && this.webviewView.webview) {
             this.webviewView.webview.postMessage({ command: 'tool.writeFile.response', requestId, success: true, action: 'autokept', filePath: resolvedPath, added, removed });
-            this.webviewView.webview.postMessage({ command: 'showNotification', text: `Auto-applied changes to ${resolvedPath}: +${added} -${removed}` });
           }
           // Also inform LLM via appendChatMessage
-          try { this.sendIncrementalMessage({ command: 'appendChatMessage', role: 'assistant', text: `Auto-applied changes to ${resolvedPath}: +${added} -${removed}`, requestId }); } catch {}
           return { success: true, action: 'autokept', filePath: resolvedPath, added, removed };
         } catch (err) {
           console.error('autopilot write failed', err);
@@ -1186,11 +1246,7 @@ class MyWebviewProvider {
       } catch (e) { console.error('hover creation failed', e); }
 
       // Notify the webview UI so it can show a small banner/notification
-      try {
-        if (this.webviewView && this.webviewView.webview) {
-          this.webviewView.webview.postMessage({ command: 'showNotification', text: `Preview opened for ${targetPath}. Use status bar Keep/Undo.` });
-        }
-      } catch (e) { /* ignore */ }
+      // Notification removed to reduce message spam
 
       // Also show a native info message so the user notices the status bar buttons
       try {
@@ -1296,6 +1352,75 @@ class MyWebviewProvider {
       }
     } catch (error) {
       console.error('Failed to send incremental message:', error);
+    }
+  }
+
+  // Handle accepting file edits (both manual and auto)
+  async handleAcceptFileEdit(filePath, changes, requestId, isAuto = false) {
+    try {
+      const fs = require('fs');
+      
+      
+      // Resolve file path
+      const resolvedPath = this.resolveFilePath(filePath);
+      if (!resolvedPath) {
+        throw new Error('Invalid file path');
+      }
+      
+      // Write changes to file
+      if (typeof changes === 'string') {
+        fs.writeFileSync(resolvedPath, changes, 'utf8');
+      }
+      
+      // Calculate diff stats (simplified)
+      const lines = changes ? changes.split('\n') : [];
+      const added = lines.filter(line => line.startsWith('+')).length;
+      const removed = lines.filter(line => line.startsWith('-')).length;
+      
+      // Notify webview
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage({
+          command: 'tool.writeFile.response',
+          requestId,
+          success: true,
+          action: isAuto ? 'autokept' : 'kept',
+          filePath: resolvedPath,
+          added,
+          removed
+        });
+      }
+      
+      console.log(`File ${isAuto ? 'auto-' : ''}accepted: ${resolvedPath}`);
+    } catch (err) {
+      console.error('handleAcceptFileEdit failed:', err);
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage({
+          command: 'tool.writeFile.response',
+          requestId,
+          success: false,
+          error: String(err)
+        });
+      }
+    }
+  }
+
+  // Handle rejecting file edits
+  async handleRejectFileEdit(filePath, requestId) {
+    try {
+      // For now, just notify that the edit was rejected
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage({
+          command: 'tool.writeFile.response',
+          requestId,
+          success: true,
+          action: 'rejected',
+          filePath
+        });
+      }
+      
+      console.log(`File edit rejected: ${filePath}`);
+    } catch (err) {
+      console.error('handleRejectFileEdit failed:', err);
     }
   }
 }

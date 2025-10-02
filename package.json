@@ -22,6 +22,17 @@
       {
         "command": "vsx.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "vsx.newChat",
+        "title": "New Chat"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "vsx.newChat",
+        "key": "ctrl+n",
+        "when": "focusedView == myView"
       }
     ],
     "viewsContainers": {
@@ -71,6 +82,12 @@
           "default": "medium",
           "description": "Default reasoning effort for Cerebras requests (low, medium, high)",
           "enum": ["low","medium","high"],
+          "scope": "application"
+        },
+        "vsx.autopilot.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable autopilot mode to automatically apply file changes without confirmation",
           "scope": "application"
         }
       }

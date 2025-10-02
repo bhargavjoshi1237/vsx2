@@ -32,7 +32,7 @@ const modelConfigs = {
     max_tokens: 4096,
     stream: true,
   },
-  "nvidia/nvidia-nemotron-nano-9b-v2": {
+  "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
     path: "/v1/chat/completions",
     temperature: 0.6,
     top_p: 0.95,
