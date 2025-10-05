@@ -46,6 +46,11 @@
       type="button">
       Set Cerebras Reasoning Effort
     </button>
+    <button id="set-duality-subtask-mode"
+      class="w-full text-left px-4 py-2 text-sm text-[#e7e7e7] hover:bg-[#2e2e2e] transition-colors rounded-md"
+      type="button">
+      Set Duality Subtask Mode
+    </button>
   </div>
 </div>
 
@@ -118,6 +123,19 @@
         } catch (e) { }
         try {
           window.dispatchEvent(new CustomEvent("vsx-setCerebrasReasoning"));
+        } catch (e) { }
+      });
+    }
+    const dualityBtn = document.getElementById("set-duality-subtask-mode");
+    if (dualityBtn) {
+      dualityBtn.addEventListener("click", () => {
+        try {
+          const vscode =
+            typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
+          if (vscode) vscode.postMessage({ command: "setDualitySubtaskMode" });
+        } catch (e) { }
+        try {
+          window.dispatchEvent(new CustomEvent("vsx-setDualitySubtaskMode"));
         } catch (e) { }
       });
     }

@@ -18,14 +18,33 @@ RESPONSE FORMAT: Always respond in this exact JSON structure:
 
 AVAILABLE TOOLS:
 • searchfile: Find files by name/pattern in workspace
+  - Single pattern: { "q": "pattern" } or { "pattern": "pattern" }
+  - Multiple patterns: { "patterns": ["pattern1", "pattern2"] }
+  - Multiple directories: { "directories": ["dir1", "dir2"], "patterns": ["*.js"] }
+  
 • fileread: Read file contents (use exact paths)
+  - Single file: { "path": "file.ext" }
+  - Multiple files: { "paths": ["file1.ext", "file2.ext"] }
+  - With encoding: { "paths": ["file.ext"], "encoding": "utf8" }
+  
 • writeFile: Create/modify files (provide complete content)
+  - Single file: { "filePath": "file.ext", "content": "content" }
+  - Multiple files: { "operations": [{"filePath": "file1.ext", "content": "content1"}, {"filePath": "file2.ext", "content": "content2"}] }
+  - Atomic operations: { "operations": [...], "atomic": true }
+  
 • terminal_command: Execute shell commands
+
+ENHANCED MULTI-FILE CAPABILITIES:
+- All tools now support batch operations for improved efficiency
+- Use array parameters for multiple files/patterns/directories
+- Backward compatibility maintained for single-file operations
+- Enhanced error handling and detailed operation results
 
 BEST PRACTICES:
 - Use relative paths from workspace root
 - Read files before modifying them
 - Provide complete file content in writeFile
+- Use batch operations when working with multiple files
 - Test changes with terminal commands when appropriate
 - Be specific and accurate with file paths`,
     bottom: `IMPORTANT GUIDELINES:
@@ -94,56 +113,118 @@ async function execute({ router, modelId, prompt, requestId, previous_chat_histo
     const args = toolEntry.args || {};
     try {
       if (tool === 'searchfile' || tool === 'searchFiles' || tool === 'searchFiles_v1') {
-        // delegate to tools/searchfile.js
+        // Enhanced searchfile tool with multi-pattern support
         try {
           const searchfile = require('../tools/searchfile');
-          const res = await searchfile(args);
+          
+          // Support enhanced multi-file search parameters
+          const enhancedArgs = { ...args };
+          
+          // Handle array-based patterns
+          if (args.patterns && Array.isArray(args.patterns)) {
+            enhancedArgs.patterns = args.patterns;
+          } else if (args.pattern && typeof args.pattern === 'string') {
+            enhancedArgs.patterns = [args.pattern];
+          } else if (args.q && typeof args.q === 'string') {
+            enhancedArgs.patterns = [args.q];
+          }
+          
+          // Handle array-based directories
+          if (args.directories && Array.isArray(args.directories)) {
+            enhancedArgs.directories = args.directories.map(d => resolveFilePath(d));
+          }
+          
+          const res = await searchfile(enhancedArgs);
           return res;
-        } catch {
-          return { tool: 'searchfile', success: false, error: 'searchfile module failed' };
+        } catch (error) {
+          return { tool: 'searchfile', success: false, error: `searchfile module failed: ${error.message}` };
         }
       }
+      
       if (tool === 'fileread' || tool === 'fileRead' || tool === 'readfile') {
-        // Resolve paths in args
-        if (args.path) args.path = resolveFilePath(args.path);
-        if (args.paths && Array.isArray(args.paths)) args.paths = args.paths.map(p => resolveFilePath(p));
-        if (args.files && Array.isArray(args.files)) args.files = args.files.map(f => ({ ...f, path: resolveFilePath(f.path) }));
+        // Enhanced fileread tool with multi-file support
         try {
           const fileread = require('../tools/fileread');
-          const res = await fileread(args);
+          const enhancedArgs = { ...args };
+          
+          // Resolve paths in args (backward compatibility)
+          if (args.path) enhancedArgs.path = resolveFilePath(args.path);
+          if (args.paths && Array.isArray(args.paths)) {
+            enhancedArgs.paths = args.paths.map(p => resolveFilePath(p));
+          }
+          if (args.files && Array.isArray(args.files)) {
+            enhancedArgs.files = args.files.map(f => {
+              if (typeof f === 'string') {
+                return resolveFilePath(f);
+              } else if (f && f.path) {
+                return { ...f, path: resolveFilePath(f.path) };
+              }
+              return f;
+            });
+          }
+          
+          // Support enhanced parameters
+          if (args.encoding) enhancedArgs.encoding = args.encoding;
+          if (args.maxFileSize) enhancedArgs.maxFileSize = args.maxFileSize;
+          
+          const res = await fileread(enhancedArgs);
           return res;
-        } catch {
-          return { tool: 'fileread', success: false, error: 'fileread module failed' };
+        } catch (error) {
+          return { tool: 'fileread', success: false, error: `fileread module failed: ${error.message}` };
         }
       }
+      
       if (tool === 'terminal_command' || tool === 'terminalcommand' || tool === 'execute_command') {
         // Default cwd to workspace root if not provided
         if (!args.cwd) args.cwd = workspaceRoot;
         else args.cwd = resolveFilePath(args.cwd) || args.cwd;
-        try {
-          const terminal = require('../tools/terminal_command');
-          const res = await terminal(args || {});
-          return res;
-        } catch {
-          return { tool: 'terminal_command', success: false, error: 'terminal_command module failed' };
-        }
+        
+        // Return terminal command for confirmation instead of executing immediately
+        return { 
+          tool: 'terminal_command', 
+          success: true, 
+          requiresConfirmation: true,
+          args: args,
+          message: 'Terminal command requires user confirmation before execution'
+        };
       }
+      
       if (tool === 'writefile' || tool === 'writeFile' || tool === 'write_file') {
-        // Resolve filePath
-        if (args.filePath) args.filePath = resolveFilePath(args.filePath);
+        // Enhanced writefile tool with multi-file support
         try {
           const writefile = require('../tools/writefile');
-          const res = await writefile(args);
+          const enhancedArgs = { ...args };
+          
+          // Handle single file operation (backward compatibility)
+          if (args.filePath || args.path) {
+            enhancedArgs.filePath = resolveFilePath(args.filePath || args.path);
+          }
+          
+          // Handle multi-file operations
+          if (args.operations && Array.isArray(args.operations)) {
+            enhancedArgs.operations = args.operations.map(op => ({
+              ...op,
+              filePath: resolveFilePath(op.filePath || op.path),
+              path: resolveFilePath(op.filePath || op.path)
+            }));
+          }
+          
+          // Support enhanced parameters
+          if (args.createDirectories !== undefined) enhancedArgs.createDirectories = args.createDirectories;
+          if (args.atomic !== undefined) enhancedArgs.atomic = args.atomic;
+          if (args.encoding) enhancedArgs.encoding = args.encoding;
+          
+          const res = await writefile(enhancedArgs);
           return res;
-        } catch {
-          return { tool: 'writefile', success: false, error: 'writefile module failed' };
+        } catch (error) {
+          return { tool: 'writefile', success: false, error: `writefile module failed: ${error.message}` };
         }
       }
 
       // Unknown tool
       return { tool, success: false, error: 'Unknown tool' };
-    } catch {
-      return { tool, success: false, error: 'tool execution error' };
+    } catch (error) {
+      return { tool, success: false, error: `tool execution error: ${error.message}` };
     }
   }
 

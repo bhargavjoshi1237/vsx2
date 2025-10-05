@@ -127,6 +127,9 @@ class MyWebviewProvider {
       this.router = null;
     }
 
+    // Initialize session management
+    this.initializeSessionManagement();
+
     // Send mode taglines mapping to webview so UI can show the appropriate placeholder tagline
     try {
       if (this.router && typeof this.router.listModes === 'function') {
@@ -195,6 +198,12 @@ class MyWebviewProvider {
             } catch {
             }
             return;
+          case "setDualitySubtaskMode":
+            try {
+              await this.promptSetDualitySubtaskMode();
+            } catch {
+            }
+            return;
           case "getApiKey":
             this.getApiKey(message.client);
             return;
@@ -235,7 +244,7 @@ class MyWebviewProvider {
             return;
           case "sendPrompt":
             try {
-              const modelId = message.modelId;
+              let modelId = message.modelId;
               const prompt = message.prompt;
               const requestId = message.requestId;
               const modeId = message.modeId;
@@ -244,6 +253,20 @@ class MyWebviewProvider {
               // Special handling for Legacy Mode
               if (modeId === 'legacy') {
                 await this.handleLegacyMode(modelId, prompt, requestId, message);
+                return;
+              }
+              
+              // Special handling for Duality Mode
+              if (modeId === 'duality') {
+                // For Duality mode, construct modelId from primaryModelId and secondaryModelId
+                const primaryModelId = message.primaryModelId;
+                const secondaryModelId = message.secondaryModelId;
+                if (primaryModelId && secondaryModelId) {
+                  modelId = `${primaryModelId}|${secondaryModelId}`;
+                } else if (!modelId) {
+                  throw new Error("Primary and secondary model IDs are required for Duality mode");
+                }
+                await this.handleDualityMode(modelId, prompt, requestId, message);
                 return;
               }
               
@@ -332,6 +355,31 @@ class MyWebviewProvider {
               if (this.webviewView && this.webviewView.webview) this.webviewView.webview.postMessage({ command: 'autoPilotChanged', enabled });
             } catch (e) {}
             return;
+            case 'setAutoPilotTerminalExecution':
+              try {
+                const enabled = Boolean(message.enabled);
+                try {
+                  // Persist like Cerebras reasoning: use workspace configuration update and notify user
+                  const vscodeCfg = require('vscode');
+                  await vscodeCfg.workspace.getConfiguration('vsx').update('autopilot.runTerminalCommands', enabled, vscodeCfg.ConfigurationTarget.Global);
+                  try {
+                    // Show a brief info message to confirm the change
+                    vscodeCfg.window.showInformationMessage(`Autopilot terminal execution ${enabled ? 'enabled' : 'disabled'}`);
+                  } catch (e) {}
+                } catch (err) {
+                  console.error('Failed to update autopilot.runTerminalCommands setting', err);
+                }
+                if (this.webviewView && this.webviewView.webview) this.webviewView.webview.postMessage({ command: 'autoPilotTerminalChanged', enabled });
+              } catch (e) {
+                console.error('setAutoPilotTerminalExecution handler error', e);
+              }
+              return;
+            case 'getAutoPilotTerminalExecution':
+              try {
+                const enabled = Boolean(vscode.workspace.getConfiguration('vsx').get('autopilot.runTerminalCommands') || false);
+                if (this.webviewView && this.webviewView.webview) this.webviewView.webview.postMessage({ command: 'autoPilotTerminalChanged', enabled });
+              } catch (e) {}
+              return;
           case 'runTerminalCommand':
             try {
               const toolCall = message.toolCall || {};
@@ -368,6 +416,12 @@ class MyWebviewProvider {
             return;
           case "legacyModeConfirmationResponse":
             this.handleLegacyModeConfirmation(message);
+            return;
+          case "dualityModeProgressUpdate":
+            this.handleDualityModeProgressUpdate(message);
+            return;
+          case "dualityModeSubtaskUpdate":
+            this.handleDualityModeSubtaskUpdate(message);
             return;
           case "tool.writeFile":
             // message: { command: 'tool.writeFile', filePath, newContent }
@@ -669,6 +723,44 @@ class MyWebviewProvider {
     }
   }
 
+  async promptSetDualitySubtaskMode() {
+    try {
+      const vscode = require('vscode');
+      
+      
+      const choice = await vscode.window.showQuickPick([
+        { 
+          label: 'Auto-decide (Default)', 
+          value: false,
+          description: 'Let the primary model decide between direct execution or subtasks'
+        },
+        { 
+          label: 'Force Subtasks', 
+          value: true,
+          description: 'Always create subtasks without asking the primary model to decide'
+        }
+      ], { 
+        placeHolder: 'Select duality mode behavior'
+      });
+      
+      if (choice === undefined) return;
+      
+      await vscode.workspace.getConfiguration('vsx').update('duality.forceSubtasks', choice.value, vscode.ConfigurationTarget.Global);
+      
+      const modeText = choice.value ? 'Force Subtasks' : 'Auto-decide';
+      vscode.window.showInformationMessage(`Duality mode set to: ${modeText}`);
+      
+      if (this.webviewView) {
+        this.webviewView.webview.postMessage({ 
+          command: 'dualitySubtaskModeChanged', 
+          value: choice.value 
+        });
+      }
+    } catch (error) {
+      console.error('Error setting duality subtask mode:', error);
+    }
+  }
+
   // Legacy Mode Handlers
   async handleLegacyMode(modelId, prompt, requestId, message) {
     try {
@@ -706,6 +798,28 @@ class MyWebviewProvider {
         context: this.context,
         previous_chat_history: prevHistory,
       });
+
+      // Check for terminal commands that require confirmation
+      if (resp && resp.tools_called && Array.isArray(resp.tools_called)) {
+        const terminalCommands = resp.tools_called.filter(tool => 
+          tool.requiresConfirmation && 
+          (tool.tool === 'terminal_command' || tool.tool === 'terminalcommand' || tool.tool === 'execute_command')
+        );
+        
+        if (terminalCommands.length > 0) {
+          // Handle terminal command confirmations
+          try {
+            await this.handleLegacyModeTerminalConfirmations(resp, terminalCommands, sessionContext);
+            return; // Don't send response yet, wait for confirmations
+          } catch (err) {
+            console.error('Error handling terminal confirmations:', err);
+            // Fall back to sending response without terminal execution
+          }
+        }
+      }
+
+      // Clean up session for non-terminal responses
+      this.legacyModeSessions.delete(sessionContext.requestId);
 
       // Normalize and format response for UI: prefer a router-provided
       // `user_text` if present, otherwise use parsed plain_text.
@@ -812,6 +926,395 @@ class MyWebviewProvider {
       }
     } catch (err) {
       console.error('Error handling Legacy Mode confirmation:', err);
+    }
+  }
+
+  async handleLegacyModeTerminalConfirmations(resp, terminalCommands, sessionContext) {
+    try {
+      console.log('Handling terminal command confirmations for legacy mode');
+
+      // If workspace setting allows autopilot to run terminal commands, execute them immediately
+      try {
+        const autoRun = Boolean(vscode.workspace.getConfiguration('vsx').get('autopilot.runTerminalCommands') || false);
+        if (autoRun) {
+          console.log('Autopilot is allowed to run terminal commands automatically; executing commands');
+          const confirmationResults = [];
+          for (const tc of terminalCommands) {
+            try {
+              const terminal = require('../tools/terminal_command');
+              const r = await terminal(tc.args || {});
+              confirmationResults.push({ ...r, approved: true, todoId: `terminal_${sessionContext.requestId}_${confirmationResults.length}` });
+            } catch (err) {
+              confirmationResults.push({ tool: 'terminal_command', success: false, error: String(err && err.message ? err.message : err), approved: true, todoId: `terminal_${sessionContext.requestId}_${confirmationResults.length}` });
+            }
+          }
+
+          // Update the tools_called array with actual results
+          const updatedToolsCalled = [...(resp.tools_called || [])];
+          let resultIndex = 0;
+          for (let i = 0; i < updatedToolsCalled.length && resultIndex < confirmationResults.length; i++) {
+            const t = updatedToolsCalled[i];
+            if (t.requiresConfirmation && (t.tool === 'terminal_command' || t.tool === 'terminalcommand' || t.tool === 'execute_command')) {
+              updatedToolsCalled[i] = { ...t, ...confirmationResults[resultIndex], requiresConfirmation: false };
+              resultIndex++;
+            }
+          }
+
+          // Send final response with updated tool results
+          if (this.webviewView && this.webviewView.webview) {
+            this.webviewView.webview.postMessage({
+              command: 'terminalConfirmationsComplete',
+              tools_called: updatedToolsCalled,
+              requestId: sessionContext.requestId
+            });
+          }
+
+          // Clean up session
+          this.legacyModeSessions.delete(sessionContext.requestId);
+          return;
+        }
+      } catch (err) {
+        console.error('Error checking autopilot.runTerminalCommands setting', err);
+      }
+      
+      // Send initial response with terminal command widgets
+      const responseForUI = Object.assign({}, resp);
+      
+      // Process response for UI display
+      try {
+        let parserLocal = null;
+        try {
+          parserLocal = require('../route/parser');
+        } catch {
+          parserLocal = null;
+        }
+
+        const parsed = parserLocal
+          ? parserLocal.parseResponse(resp && resp.raw !== undefined ? resp.raw : resp)
+          : { plain_text: '', thinking_text: '', metadata: {} };
+
+        let user_text = null;
+        if (resp && typeof resp.user_text === 'string' && resp.user_text.length) {
+          user_text = resp.user_text;
+        } else if (parsed && typeof parsed.plain_text === 'string') {
+          try {
+            const maybeJson = JSON.parse(parsed.plain_text);
+            if (maybeJson && typeof maybeJson.user_text === 'string') user_text = maybeJson.user_text;
+          } catch {
+            // not JSON
+          }
+        }
+
+        responseForUI.plain_text = user_text || parsed.plain_text;
+        responseForUI.thinking_text = parsed.thinking_text;
+        responseForUI.metadata = parsed.metadata || responseForUI.metadata || {};
+        
+        // Ensure there is a top-level `text` field
+        if (!responseForUI.text || String(responseForUI.text).trim().length === 0) {
+          if (typeof responseForUI.plain_text === 'string' && responseForUI.plain_text.trim().length) {
+            responseForUI.text = responseForUI.plain_text;
+          } else if (typeof responseForUI.user_text === 'string' && responseForUI.user_text.trim().length) {
+            responseForUI.text = responseForUI.user_text;
+          } else if (responseForUI.raw !== undefined) {
+            try {
+              responseForUI.text = typeof responseForUI.raw === 'string' ? responseForUI.raw : JSON.stringify(responseForUI.raw);
+            } catch {
+              responseForUI.text = String(responseForUI.raw || '');
+            }
+          } else {
+            responseForUI.text = '';
+          }
+        }
+      } catch {
+        // If parsing fails, fall back to sending raw router response
+      }
+
+      // Send response to webview with terminal commands requiring confirmation
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage({
+          command: 'assistantMessage',
+          text: responseForUI.text || '',
+          plain_text: responseForUI.plain_text || '',
+          thinking_text: responseForUI.thinking_text || '',
+          metadata: responseForUI.metadata || {},
+          tools_called: resp.tools_called || [],
+          requestId: sessionContext.requestId
+        });
+      }
+
+      // Wait for all terminal command confirmations
+      const confirmationPromises = terminalCommands.map(async (terminalCommand, index) => {
+        const todoId = `terminal_${sessionContext.requestId}_${index}`;
+        
+        return new Promise((resolve) => {
+          // Set up timeout to prevent hanging
+          const timeout = setTimeout(() => {
+            sessionContext.confirmationCallbacks.delete(todoId);
+            resolve({ 
+              tool: 'terminal_command', 
+              success: false, 
+              skipped: true, 
+              message: 'User confirmation timeout',
+              approved: false,
+              todoId
+            });
+          }, 300000); // 5 minute timeout
+          
+          sessionContext.confirmationCallbacks.set(todoId, async ({ approved }) => {
+            clearTimeout(timeout);
+            
+            if (approved) {
+              // Execute the terminal command
+              try {
+                const terminal = require('../tools/terminal_command');
+                const result = await terminal(terminalCommand.args || {});
+                resolve({ ...result, approved: true, todoId });
+              } catch (error) {
+                resolve({ 
+                  tool: 'terminal_command', 
+                  success: false, 
+                  error: `terminal_command module failed: ${error.message}`,
+                  approved: true,
+                  todoId
+                });
+              }
+            } else {
+              // Command was skipped
+              resolve({ 
+                tool: 'terminal_command', 
+                success: false, 
+                skipped: true, 
+                message: 'User declined execution',
+                approved: false,
+                todoId
+              });
+            }
+          });
+        });
+      });
+
+      // Wait for all confirmations to complete
+      const confirmationResults = await Promise.all(confirmationPromises);
+      
+      // Update the tools_called array with actual results
+      const updatedToolsCalled = [...(resp.tools_called || [])];
+      confirmationResults.forEach((result) => {
+        const terminalCommandIndex = updatedToolsCalled.findIndex(tool => 
+          tool.requiresConfirmation && 
+          (tool.tool === 'terminal_command' || tool.tool === 'terminalcommand' || tool.tool === 'execute_command')
+        );
+        if (terminalCommandIndex !== -1) {
+          updatedToolsCalled[terminalCommandIndex] = {
+            ...updatedToolsCalled[terminalCommandIndex],
+            ...result,
+            requiresConfirmation: false
+          };
+        }
+      });
+
+      // Send final response with updated tool results
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage({
+          command: 'terminalConfirmationsComplete',
+          tools_called: updatedToolsCalled,
+          requestId: sessionContext.requestId
+        });
+      }
+
+      // Clean up session
+      this.legacyModeSessions.delete(sessionContext.requestId);
+      
+    } catch (err) {
+      console.error('Error handling legacy mode terminal confirmations:', err);
+      
+      // Send error response
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage({
+          command: 'assistantMessage',
+          text: 'Error processing terminal command confirmations',
+          requestId: sessionContext.requestId
+        });
+      }
+    }
+  }
+
+  // Duality Mode Handlers
+  async handleDualityMode(modelId, prompt, requestId, message) {
+    try {
+      console.log('Handling Duality Mode execution for request:', requestId);
+      
+      // Initialize Duality Mode session storage
+      if (!this.dualityModeSessions) {
+        this.dualityModeSessions = new Map();
+      }
+      
+      // Create session context
+      const sessionContext = {
+        modelId,
+        prompt,
+        requestId,
+        startTime: new Date().toISOString(),
+        webviewProvider: this,
+        status: 'initializing'
+      };
+      
+      this.dualityModeSessions.set(requestId, sessionContext);
+      
+      // Run Duality Mode
+      // If the webview included `previous_chat_history` in the original message, forward it to the mode
+      let prevHistory = null;
+      try {
+        if (message && Array.isArray(message.previous_chat_history)) prevHistory = message.previous_chat_history;
+      } catch { }
+
+      const resp = await this.router.runMode('duality', {
+        router: this.router,
+        modelId,
+        prompt,
+        requestId,
+        context: this.context,
+        previous_chat_history: prevHistory,
+        webviewProvider: this,
+      });
+
+      // Clean up session
+      this.dualityModeSessions.delete(requestId);
+
+      // Normalize and format response for UI
+      const responseForUI = Object.assign({}, resp);
+      try {
+        let parserLocal = null;
+        try {
+          parserLocal = require('../route/parser');
+        } catch {
+          parserLocal = null;
+        }
+
+        const parsed = parserLocal
+          ? parserLocal.parseResponse(resp && resp.raw !== undefined ? resp.raw : resp)
+          : { plain_text: '', thinking_text: '', metadata: {} };
+
+        // If router returned a direct `user_text`, prefer that for UI.
+        responseForUI.plain_text =
+          (resp && typeof resp.user_text === 'string' && resp.user_text.length)
+            ? resp.user_text
+            : parsed.plain_text;
+        responseForUI.thinking_text = parsed.thinking_text;
+        responseForUI.metadata = parsed.metadata || responseForUI.metadata || {};
+        
+        // Add Duality mode specific metadata
+        if (resp && resp.isDualityExecution) {
+          responseForUI.isDualityExecution = true;
+          responseForUI.dualityMetadata = resp.raw || {};
+        }
+      } catch {
+        // If parsing fails, fall back to sending raw router response
+      }
+
+      // Send final response to webview so the UI can update the assistant message
+      try {
+        this.webviewView.webview.postMessage({
+          command: 'promptResponse',
+          requestId,
+          response: responseForUI,
+          final: true,
+        });
+      } catch (err) {
+        console.error('Failed to post final promptResponse for duality mode:', err);
+      }
+
+    } catch (err) {
+      console.error('Error handling Duality Mode:', err);
+      
+      // Clean up session
+      if (this.dualityModeSessions) {
+        this.dualityModeSessions.delete(requestId);
+      }
+      
+      // Send error response to webview
+      try {
+        this.webviewView.webview.postMessage({
+          command: 'promptResponse',
+          requestId,
+          error: String(err),
+        });
+      } catch (postErr) {
+        console.error('Failed to post error response for duality mode:', postErr);
+      }
+    }
+  }
+
+  // Send Duality mode error to UI
+  async sendDualityError(requestId, errorData) {
+    try {
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage({
+          command: 'dualityModeError',
+          requestId,
+          errorData
+        });
+      }
+    } catch (err) {
+      console.error('Failed to send Duality mode error:', err);
+    }
+  }
+
+  handleDualityModeProgressUpdate(message) {
+    try {
+      const { requestId, progressData } = message;
+      console.log('Duality Mode progress update received:', { requestId, progressData });
+      
+      // Find the session that requested this update
+      if (this.dualityModeSessions && this.dualityModeSessions.has(requestId)) {
+        const session = this.dualityModeSessions.get(requestId);
+        session.lastProgressUpdate = progressData;
+        session.lastUpdateTime = new Date().toISOString();
+      }
+      
+      // Forward progress update to UI
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage({
+          command: 'dualityModeProgress',
+          requestId,
+          progressData
+        });
+      }
+    } catch (err) {
+      console.error('Error handling Duality Mode progress update:', err);
+    }
+  }
+
+  handleDualityModeSubtaskUpdate(message) {
+    try {
+      const { requestId, subtaskIndex, status, result, verification } = message;
+      console.log('Duality Mode subtask update received:', { requestId, subtaskIndex, status });
+      
+      // Find the session that requested this update
+      if (this.dualityModeSessions && this.dualityModeSessions.has(requestId)) {
+        const session = this.dualityModeSessions.get(requestId);
+        if (!session.subtaskUpdates) session.subtaskUpdates = [];
+        session.subtaskUpdates.push({
+          subtaskIndex,
+          status,
+          result,
+          verification,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      // Forward subtask update to UI
+      if (this.webviewView && this.webviewView.webview) {
+        this.webviewView.webview.postMessage({
+          command: 'dualityModeSubtaskUpdate',
+          requestId,
+          subtaskIndex,
+          status,
+          result,
+          verification
+        });
+      }
+    } catch (err) {
+      console.error('Error handling Duality Mode subtask update:', err);
     }
   }
   
@@ -1421,6 +1924,137 @@ class MyWebviewProvider {
       console.log(`File edit rejected: ${filePath}`);
     } catch (err) {
       console.error('handleRejectFileEdit failed:', err);
+    }
+  }
+
+  // Session Management Methods
+  initializeSessionManagement() {
+    try {
+      // Initialize session storage maps
+      if (!this.dualityModeSessions) {
+        this.dualityModeSessions = new Map();
+      }
+      if (!this.legacyModeSessions) {
+        this.legacyModeSessions = new Map();
+      }
+      
+      // Set up periodic cleanup
+      this.setupSessionCleanup();
+      
+      console.log('Session management initialized');
+    } catch (err) {
+      console.error('Error initializing session management:', err);
+    }
+  }
+
+  setupSessionCleanup() {
+    try {
+      // Clean up expired sessions every 5 minutes
+      if (this.sessionCleanupInterval) {
+        clearInterval(this.sessionCleanupInterval);
+      }
+      
+      this.sessionCleanupInterval = setInterval(() => {
+        this.cleanupExpiredSessions();
+      }, 300000); // 5 minutes
+      
+      // Clean up on extension deactivation
+      if (this.context && this.context.subscriptions) {
+        this.context.subscriptions.push({
+          dispose: () => {
+            if (this.sessionCleanupInterval) {
+              clearInterval(this.sessionCleanupInterval);
+            }
+            this.cleanupAllSessions();
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Error setting up session cleanup:', err);
+    }
+  }
+
+  cleanupExpiredSessions() {
+    try {
+      const now = Date.now();
+      const maxAge = 3600000; // 1 hour
+      
+      // Clean up Duality mode sessions
+      for (const [requestId, session] of this.dualityModeSessions.entries()) {
+        if (session.startTime && (now - new Date(session.startTime).getTime()) > maxAge) {
+          this.dualityModeSessions.delete(requestId);
+          console.log(`Cleaned up expired Duality mode session: ${requestId}`);
+        }
+      }
+      
+      // Clean up Legacy mode sessions
+      for (const [requestId, session] of this.legacyModeSessions.entries()) {
+        if (session.startTime && (now - new Date(session.startTime).getTime()) > maxAge) {
+          this.legacyModeSessions.delete(requestId);
+          console.log(`Cleaned up expired Legacy mode session: ${requestId}`);
+        }
+      }
+      
+      // Clean up Duality mode internal sessions
+      try {
+        const dualityMode = require('../modes/duality');
+        if (dualityMode.SessionManager) {
+          dualityMode.SessionManager.cleanupExpiredSessions(maxAge);
+        }
+      } catch (err) {
+        // Duality mode might not be available
+      }
+    } catch (err) {
+      console.error('Error cleaning up expired sessions:', err);
+    }
+  }
+
+  cleanupAllSessions() {
+    try {
+      // Clean up all webview provider sessions
+      this.dualityModeSessions.clear();
+      this.legacyModeSessions.clear();
+      
+      // Clean up Duality mode internal sessions
+      try {
+        const dualityMode = require('../modes/duality');
+        if (dualityMode.SessionManager) {
+          const activeSessions = dualityMode.SessionManager.getAllActiveSessions();
+          for (const session of activeSessions) {
+            dualityMode.SessionManager.cleanupSession(session.requestId);
+          }
+        }
+      } catch (err) {
+        // Duality mode might not be available
+      }
+      
+      console.log('All sessions cleaned up');
+    } catch (err) {
+      console.error('Error cleaning up all sessions:', err);
+    }
+  }
+
+  recoverDualitySession(requestId) {
+    try {
+      const dualityMode = require('../modes/duality');
+      if (dualityMode.SessionManager) {
+        const recoveredSession = dualityMode.SessionManager.recoverSession(requestId);
+        if (recoveredSession) {
+          recoveredSession.webviewProvider = this;
+          this.dualityModeSessions.set(requestId, {
+            requestId,
+            startTime: new Date().toISOString(),
+            webviewProvider: this,
+            status: 'recovered',
+            recoveredSession: recoveredSession
+          });
+          return recoveredSession;
+        }
+      }
+      return null;
+    } catch (err) {
+      console.error(`Error recovering Duality session ${requestId}:`, err);
+      return null;
     }
   }
 }

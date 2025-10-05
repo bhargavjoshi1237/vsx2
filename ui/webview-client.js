@@ -1,5 +1,8 @@
 // ui/webview-client.js
 // Clean, minimal webview chat client implementation.
+/* eslint-env browser */
+/* global acquireVsCodeApi, document, window, navigator */
+/* eslint-disable no-unused-vars */
 (function () {
   'use strict';
 
@@ -11,8 +14,16 @@
 
   let selectedModel = '';
   let selectedMode = '';
+  let selectedPrimaryModel = '';
+  let selectedSecondaryModel = '';
   let loadingNode = null;
+  // Track active duality subtask executions so we can keep the send-button
+  // in a loading/disabled state until all subtasks finish.
+  const activeDualitySubtasks = {};
   let modelsRequestAttempts = 0;
+  let currentRequestId = null;
+  let currentRequestStartTime = null;
+  let requestTimeout = null;
   
   const maxRetryAttempts = 3;
   
@@ -135,20 +146,44 @@
     if (loadingNode) return loadingNode;
     loadingNode = document.createElement('div');
     loadingNode.id = 'global-loading';
-    loadingNode.className = 'loading-node m-3 text-gray-400';
-
-    const spinners = `
-      <span class="spinner-icons inline-flex items-center space-x-2" aria-hidden="true">
-        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24"><path fill="currentColor" d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z" opacity=".25"/><path fill="currentColor" d="M12,4a8,8,0,0,1,7.89,6.7A1.53,1.53,0,0,0,21.38,12h0a1.5,1.5,0,0,0,1.48-1.75,11,11,0,0,0-21.72,0A1.5,1.5,0,0,0,2.62,12h0a1.53,1.53,0,0,0,1.49-1.3A8,8,0,0,1,12,4Z"><animateTransform attributeName="transform" dur="0.75s" repeatCount="indefinite" type="rotate" values="0 12 12;360 12 12"/></path></svg>
-         </span>
+    // Remove the top margin (m-3) which causes an unwanted gap above messages.
+    loadingNode.className = 'loading-node text-gray-400';
+    // Use a compact SVG spinner and include a stop button to allow cancelling the request
+    const spinnerSvg = `
+      <svg width="18" height="18" viewBox="0 0 50 50" aria-hidden="true" focusable="false">
+        <path fill="none" stroke="#86efac" stroke-width="4" stroke-linecap="round" d="M25 5a20 20 0 1 0 20 20" stroke-dasharray="31.4 31.4">
+          <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s" repeatCount="indefinite" />
+        </path>
+      </svg>
     `;
 
     loadingNode.innerHTML = `
       <div class="loading-inner">
-        ${spinners}
+        <span class="spinner-icons">${spinnerSvg}</span>
         <span class="loading-text">Working...</span>
       </div>
+      <div class="loading-actions">
+        <button class="stop-btn" type="button" title="Stop current task">⏹ Stop</button>
+      </div>
     `;
+
+    // Wire stop button
+    try {
+      const stopBtn = loadingNode.querySelector('.stop-btn');
+      if (stopBtn) {
+        stopBtn.addEventListener('click', () => {
+          try {
+            // Let host know to cancel the current request
+            if (vscode && currentRequestId) {
+              vscode.postMessage({ command: 'cancelRequest', requestId: currentRequestId });
+            }
+            // provide immediate feedback
+            stopBtn.disabled = true;
+            stopBtn.textContent = 'Stopping...';
+          } catch (e) { console.error('stopBtn click failed', e); }
+        });
+      }
+    } catch (e) { /* ignore wiring errors */ }
     return loadingNode;
   }
 
@@ -173,6 +208,12 @@
     if (metaEl) metaEl.textContent = metaText(meta, showMeta);
     
     container.appendChild(node);
+    // Ensure there's no extra gap above the first message
+    try {
+      if (container.firstElementChild) {
+        container.firstElementChild.style.marginTop = '0px';
+      }
+    } catch (e) { /* ignore DOM write errors */ }
     if (loadingNode && loadingNode.parentNode === container) container.appendChild(loadingNode);
     container.scrollTop = container.scrollHeight;
     updatePlaceholderVisibility();
@@ -193,7 +234,39 @@
     if (!node) return null;
     const textEl = node.querySelector('.message-text');
     const metaEl = node.querySelector('.meta-text');
+
+    // Preserve widget elements inside the message (duality widget, terminal widgets, code widgets, etc.)
+    const preservedSelectors = [
+      '.duality-mode-widget',
+      '.subtask-progress-widget',
+      '.code-widget-wrapper',
+      '.terminal-tool-widget',
+      '.file-changes-widget',
+      '.file-edit-preview'
+    ];
+    const preserved = [];
+    try {
+      preservedSelectors.forEach(selc => {
+        const els = textEl.querySelectorAll(selc);
+        els.forEach(el => {
+          preserved.push(el);
+          el.parentNode && el.parentNode.removeChild(el);
+        });
+      });
+    } catch (err) {
+      // ignore
+    }
+
+    // Render the assistant text (this will clear message-text)
     renderMessageContent(textEl, text);
+
+    // Restore preserved widgets so they remain sticky while text updates
+    try {
+      preserved.forEach(w => textEl.appendChild(w));
+    } catch (err) {
+      // ignore
+    }
+
     if (metaEl) metaEl.textContent = metaText(meta, isLastMessage);
     const spinner = node.querySelector('.assistant-spinner'); if (spinner) spinner.style.display = 'none';
     const status = node.querySelector('.status-text'); if (status) status.style.display = 'none';
@@ -282,13 +355,323 @@
   }
 
   function setSelectedModel(id) { selectedModel = id || ''; }
-  function setSelectedMode(id) { selectedMode = id || ''; }
+  function setSelectedMode(id) { 
+    selectedMode = id || ''; 
+    updateModelSelectorVisibility();
+  }
+  function setSelectedPrimaryModel(id) { selectedPrimaryModel = id || ''; updateSendButtonState(); }
+  function setSelectedSecondaryModel(id) { selectedSecondaryModel = id || ''; updateSendButtonState(); }
+
+  function updateModelSelectorVisibility() {
+    const singleModelDropdown = document.getElementById('model-dropdown');
+    const dualityModelSelectors = document.getElementById('duality-model-selectors');
+    
+    if (selectedMode === 'duality') {
+      // Show dual model selectors, hide single model dropdown
+      if (singleModelDropdown) singleModelDropdown.style.display = 'none';
+      if (dualityModelSelectors) dualityModelSelectors.classList.remove('hidden');
+    } else {
+      // Show single model dropdown, hide dual model selectors
+      if (singleModelDropdown) singleModelDropdown.style.display = 'block';
+      if (dualityModelSelectors) dualityModelSelectors.classList.add('hidden');
+    }
+  }
+
+  function updateSendButtonState() {
+    const sendBtn = document.getElementById('send-btn');
+    if (!sendBtn) return;
+
+    // Check if currently processing a request
+    if (loadingNode) {
+      sendBtn.disabled = true;
+      sendBtn.style.opacity = '0.5';
+      sendBtn.title = 'Processing request...';
+      return;
+    }
+
+    if (selectedMode === 'duality') {
+      // For Duality mode, validate both models and provide detailed feedback
+      const hasPrimary = selectedPrimaryModel && selectedPrimaryModel.trim() !== '';
+      const hasSecondary = selectedSecondaryModel && selectedSecondaryModel.trim() !== '';
+      const isValid = hasPrimary && hasSecondary;
+      
+      sendBtn.disabled = !isValid;
+      sendBtn.style.opacity = isValid ? '1' : '0.5';
+      
+      if (!hasPrimary && !hasSecondary) {
+        sendBtn.title = 'Please select both primary and secondary models for Duality mode';
+        showValidationMessage('Both primary and secondary models are required for Duality mode', 'warning');
+      } else if (!hasPrimary) {
+        sendBtn.title = 'Please select a primary model';
+        showValidationMessage('Primary model is required', 'warning');
+      } else if (!hasSecondary) {
+        sendBtn.title = 'Please select a secondary model';
+        showValidationMessage('Secondary model is required', 'warning');
+      } else {
+        sendBtn.title = 'Send Message (Duality Mode)';
+        clearValidationMessage();
+      }
+    } else {
+      // For other modes, validate single model selection
+      const isValid = selectedModel && selectedModel.trim() !== '';
+      sendBtn.disabled = !isValid;
+      sendBtn.style.opacity = isValid ? '1' : '0.5';
+      
+      if (!isValid) {
+        sendBtn.title = 'Please select a model first';
+        showValidationMessage('Please select a model to continue', 'warning');
+      } else {
+        sendBtn.title = 'Send Message';
+        clearValidationMessage();
+      }
+    }
+  }
+
+  // Show validation messages to user
+  function showValidationMessage(message, type = 'info') {
+    clearValidationMessage();
+    
+    const validationEl = document.createElement('div');
+    validationEl.id = 'validation-message';
+    validationEl.className = `validation-message ${type}`;
+    
+    const icon = type === 'warning' ? '⚠️' : type === 'error' ? '❌' : 'ℹ️';
+    validationEl.innerHTML = `
+      <span class="validation-icon">${icon}</span>
+      <span class="validation-text">${message}</span>
+    `;
+    
+    // Insert before input area
+    const inputArea = document.querySelector('.input-area');
+    if (inputArea) {
+      inputArea.parentNode.insertBefore(validationEl, inputArea);
+      
+      // Auto-hide after 5 seconds for non-error messages
+      if (type !== 'error') {
+        setTimeout(() => {
+          clearValidationMessage();
+        }, 5000);
+      }
+    }
+  }
+
+  // Clear validation messages
+  function clearValidationMessage() {
+    const existing = document.getElementById('validation-message');
+    if (existing) {
+      existing.remove();
+    }
+  }
+
+  // Show loading state with progress indicator
+  function showLoadingState(message = 'Processing...') {
+    const sendBtn = document.getElementById('send-btn');
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.style.opacity = '0.5';
+      sendBtn.innerHTML = `
+        <div class="loading-spinner"></div>
+        <span>${message}</span>
+      `;
+    }
+    
+    clearValidationMessage();
+  }
+
+  // Hide loading state
+  function hideLoadingState() {
+    const sendBtn = document.getElementById('send-btn');
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.style.opacity = '1';
+      sendBtn.innerHTML = 'Send';
+    }
+    
+    updateSendButtonState();
+  }
+
+  // Handle request timeout
+  function handleRequestTimeout(requestId) {
+    console.warn(`Request ${requestId} timed out`);
+    
+    if (currentRequestId === requestId) {
+      cleanupCurrentRequest();
+      setLoading(false);
+      
+      showErrorState({
+        title: 'Request Timeout',
+        message: 'The request took too long to complete. This might be due to network issues or model unavailability.',
+        type: 'timeout',
+        requestId: requestId,
+        actions: [
+          { label: 'Retry', action: 'retry' },
+          { label: 'Cancel', action: 'cancel' }
+        ]
+      });
+    }
+  }
+
+  // Handle request errors
+  function handleRequestError(requestId, errorMessage, errorData = {}) {
+    console.error(`Request ${requestId} failed:`, errorMessage, errorData);
+    
+    if (currentRequestId === requestId) {
+      cleanupCurrentRequest();
+      setLoading(false);
+      
+      const isRetryable = errorData.recoverable !== false;
+      const actions = [];
+      
+      if (isRetryable) {
+        actions.push({ label: 'Retry', action: 'retry' });
+      }
+      actions.push({ label: 'Cancel', action: 'cancel' });
+      
+      showErrorState({
+        title: errorData.type === 'network' ? 'Network Error' : 'Request Failed',
+        message: errorMessage,
+        type: errorData.type || 'error',
+        requestId: requestId,
+        actions: actions,
+        details: errorData
+      });
+    }
+  }
+
+  // Clean up current request
+  function cleanupCurrentRequest() {
+    if (requestTimeout) {
+      clearTimeout(requestTimeout);
+      requestTimeout = null;
+    }
+    
+    currentRequestId = null;
+    currentRequestStartTime = null;
+    hideLoadingState();
+    clearValidationMessage();
+  }
+
+  // Show error state with recovery options
+  function showErrorState(errorInfo) {
+    clearValidationMessage();
+    
+    const errorEl = document.createElement('div');
+    errorEl.className = 'error-state';
+    errorEl.id = `error-state-${errorInfo.requestId}`;
+    
+    let actionsHtml = '';
+    if (errorInfo.actions && errorInfo.actions.length > 0) {
+      actionsHtml = `
+        <div class="error-state-actions">
+          ${errorInfo.actions.map(action => 
+            `<button class="error-action-btn" data-action="${action.action}" data-request-id="${errorInfo.requestId}">
+              ${action.label}
+            </button>`
+          ).join('')}
+        </div>
+      `;
+    }
+    
+    errorEl.innerHTML = `
+      <div class="error-state-title">
+        <span>❌</span>
+        <span>${errorInfo.title}</span>
+      </div>
+      <div class="error-state-message">${errorInfo.message}</div>
+      ${actionsHtml}
+    `;
+    
+    // Insert before input area
+    const inputArea = document.querySelector('.input-area');
+    if (inputArea) {
+      inputArea.parentNode.insertBefore(errorEl, inputArea);
+      
+      // Add event listeners for action buttons
+      const actionBtns = errorEl.querySelectorAll('.error-action-btn');
+      actionBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const action = btn.dataset.action;
+          const requestId = btn.dataset.requestId;
+          handleErrorAction(action, requestId, errorInfo);
+        });
+      });
+    }
+  }
+
+  // Handle error action buttons
+  function handleErrorAction(action, requestId, errorInfo) {
+    const errorEl = document.getElementById(`error-state-${requestId}`);
+    if (errorEl) {
+      errorEl.remove();
+    }
+    
+    switch (action) {
+      case 'retry':
+        // Retry the last request
+        const inputTa = document.getElementById('inputTextArea');
+        if (inputTa && errorInfo.originalPrompt) {
+          inputTa.value = errorInfo.originalPrompt;
+          // Trigger send button click
+          const sendBtn = document.getElementById('send-btn');
+          if (sendBtn) {
+            sendBtn.click();
+          }
+        }
+        break;
+      case 'cancel':
+        // Just remove the error state
+        break;
+    }
+  }
+
+  // Clear error states
+  function clearErrorStates() {
+    const errorStates = document.querySelectorAll('.error-state');
+    errorStates.forEach(el => el.remove());
+  }
+
+  // Show retry indicator
+  function showRetryIndicator(requestId, message, attempt, maxAttempts) {
+    // Remove existing retry indicator
+    const existing = document.getElementById(`retry-indicator-${requestId}`);
+    if (existing) {
+      existing.remove();
+    }
+    
+    const retryEl = document.createElement('div');
+    retryEl.className = 'retry-indicator';
+    retryEl.id = `retry-indicator-${requestId}`;
+    
+    retryEl.innerHTML = `
+      <div class="retry-spinner"></div>
+      <span>${message} (${attempt}/${maxAttempts})</span>
+    `;
+    
+    // Insert before input area
+    const inputArea = document.querySelector('.input-area');
+    if (inputArea) {
+      inputArea.parentNode.insertBefore(retryEl, inputArea);
+      
+      // Auto-remove after 10 seconds
+      setTimeout(() => {
+        if (retryEl.parentNode) {
+          retryEl.remove();
+        }
+      }, 10000);
+    }
+  }
+
+  // Clear retry indicators
+  
 
   function updateModelDropdown(modelsPayload) {
     try {
       const listEl = document.getElementById('model-list');
       const dropdown = document.getElementById('model-dropdown');
       if (!listEl || !dropdown) return;
+      
+      // Also update dual model selectors
+      updateDualModelDropdowns(modelsPayload);
       
       console.log('[webview-client] Updating model dropdown with:', modelsPayload);
       
@@ -377,6 +760,140 @@
     }
   }
 
+  function updateDualModelDropdowns(modelsPayload) {
+    try {
+      const primaryListEl = document.getElementById('primary-model-list');
+      const secondaryListEl = document.getElementById('secondary-model-list');
+      const primaryDropdown = document.getElementById('primary-model-dropdown');
+      const secondaryDropdown = document.getElementById('secondary-model-dropdown');
+      
+      if (!primaryListEl || !secondaryListEl || !primaryDropdown || !secondaryDropdown) return;
+      
+      const models = (modelsPayload && modelsPayload.flatList) ? modelsPayload.flatList : (Array.isArray(modelsPayload) ? modelsPayload : []);
+      
+      // Clear existing lists
+      primaryListEl.innerHTML = '';
+      secondaryListEl.innerHTML = '';
+      
+      if (!models || !Array.isArray(models) || models.length === 0) {
+        const createEmptyLi = () => {
+          const li = document.createElement('li');
+          li.className = 'px-3 py-2 text-gray-400 text-center';
+          li.textContent = 'No models available';
+          return li;
+        };
+        primaryListEl.appendChild(createEmptyLi());
+        secondaryListEl.appendChild(createEmptyLi());
+        return;
+      }
+      
+      // Populate both dropdowns with the same models
+      models.forEach(m => {
+        const id = m.id || m.modelId || m.name || String(m);
+        const name = m.name || m.displayName || m.id || id;
+        const disabled = m.disabled || false;
+        
+        // Create primary model option
+        const primaryLi = document.createElement('li');
+        primaryLi.className = disabled 
+          ? 'px-3 py-2 text-gray-500 cursor-pointer text-sm hover:bg-gray-700 hover:text-gray-300 transition-colors'
+          : 'px-3 py-2 hover:bg-gray-700 cursor-pointer text-sm text-gray-200 hover:text-white transition-colors';
+        primaryLi.dataset.modelId = id;
+        primaryLi.setAttribute('role', 'option');
+        primaryLi.textContent = name;
+        
+        primaryLi.addEventListener('click', () => {
+          if (disabled) {
+            if (vscode) {
+              vscode.postMessage({ command: 'openApiKeySetup' });
+            }
+            return;
+          }
+          
+          selectedPrimaryModel = id;
+          try {
+            const btnSpan = primaryDropdown.querySelector('button span'); 
+            if (btnSpan) btnSpan.textContent = name;
+          } catch (err) { 
+            console.error('updateDualModelDropdowns primary click error', err); 
+          }
+          try { primaryDropdown.dataset.selectedModelId = id; } catch (err) {}
+          try { if (primaryDropdown.__x && primaryDropdown.__x.$data) primaryDropdown.__x.$data.selected = name; } catch (err) {}
+          updateSendButtonState();
+        });
+        
+        // Create secondary model option
+        const secondaryLi = document.createElement('li');
+        secondaryLi.className = disabled 
+          ? 'px-3 py-2 text-gray-500 cursor-pointer text-sm hover:bg-gray-700 hover:text-gray-300 transition-colors'
+          : 'px-3 py-2 hover:bg-gray-700 cursor-pointer text-sm text-gray-200 hover:text-white transition-colors';
+        secondaryLi.dataset.modelId = id;
+        secondaryLi.setAttribute('role', 'option');
+        secondaryLi.textContent = name;
+        
+        secondaryLi.addEventListener('click', () => {
+          if (disabled) {
+            if (vscode) {
+              vscode.postMessage({ command: 'openApiKeySetup' });
+            }
+            return;
+          }
+          
+          selectedSecondaryModel = id;
+          try {
+            const btnSpan = secondaryDropdown.querySelector('button span'); 
+            if (btnSpan) btnSpan.textContent = name;
+          } catch (err) { 
+            console.error('updateDualModelDropdowns secondary click error', err); 
+          }
+          try { secondaryDropdown.dataset.selectedModelId = id; } catch (err) {}
+          try { if (secondaryDropdown.__x && secondaryDropdown.__x.$data) secondaryDropdown.__x.$data.selected = name; } catch (err) {}
+          updateSendButtonState();
+        });
+        
+        primaryListEl.appendChild(primaryLi);
+        secondaryListEl.appendChild(secondaryLi);
+      });
+      
+      // Set default selections if none and we have enabled models
+      const enabledModels = models.filter(m => !m.disabled);
+      if (!selectedPrimaryModel && enabledModels.length) {
+        const first = enabledModels[0];
+        selectedPrimaryModel = first.id || first.modelId || first.name || String(first);
+        try { 
+          const btnSpan = primaryDropdown.querySelector('button span'); 
+          if (btnSpan) btnSpan.textContent = first.name || first.id || selectedPrimaryModel; 
+        } catch (err) { 
+          console.error(err); 
+        }
+        try { 
+          if (primaryDropdown.__x && primaryDropdown.__x.$data) primaryDropdown.__x.$data.selected = first.name || first.id || selectedPrimaryModel; 
+        } catch (err) { }
+        try { primaryDropdown.dataset.selectedModelId = selectedPrimaryModel; } catch (err) {}
+      }
+      
+      if (!selectedSecondaryModel && enabledModels.length > 1) {
+        // Default to second model if available, otherwise same as primary
+        const second = enabledModels[1] || enabledModels[0];
+        selectedSecondaryModel = second.id || second.modelId || second.name || String(second);
+        try { 
+          const btnSpan = secondaryDropdown.querySelector('button span'); 
+          if (btnSpan) btnSpan.textContent = second.name || second.id || selectedSecondaryModel; 
+        } catch (err) { 
+          console.error(err); 
+        }
+        try { 
+          if (secondaryDropdown.__x && secondaryDropdown.__x.$data) secondaryDropdown.__x.$data.selected = second.name || second.id || selectedSecondaryModel; 
+        } catch (err) { }
+        try { secondaryDropdown.dataset.selectedModelId = selectedSecondaryModel; } catch (err) {}
+      }
+      
+      updateSendButtonState();
+    } catch (e) { 
+      console.error('updateDualModelDropdowns error', e); 
+    }
+  }
+
   function updateModeList(modes) {
     try {
       const listEl = document.getElementById('mode-list');
@@ -407,6 +924,8 @@
           try { const btnSpan = dropdown.querySelector('button span'); if (btnSpan) btnSpan.textContent = name; } catch (err) { console.error(err); }
           try { dropdown.dataset.selectedModeId = id; } catch (err) {}
           try { if (dropdown.__x && dropdown.__x.$data) dropdown.__x.$data.selected = name; } catch (err) {}
+          updateModelSelectorVisibility();
+          updateSendButtonState();
         });
         listEl.appendChild(li);
       });
@@ -422,6 +941,8 @@
           if (dropdown.__x && dropdown.__x.$data) dropdown.__x.$data.selected = first.name || first.id || selectedMode; 
         } catch (err) {}
         try { dropdown.dataset.selectedModeId = selectedMode; } catch (err) {}
+        updateModelSelectorVisibility();
+        updateSendButtonState();
       }
     } catch (e) { 
       console.error('updateModeList error', e); 
@@ -551,6 +1072,8 @@
     clearMessages,
     setSelectedModel,
     setSelectedMode,
+    setSelectedPrimaryModel,
+    setSelectedSecondaryModel,
     // Helper to request the extension host show a diff and apply/undo a file write
     invokeWriteFile: (filePath, newContent, requestId) => {
       try { if (vscode) vscode.postMessage({ command: 'tool.writeFile', filePath, newContent, requestId }); } catch (e) { console.error('invokeWriteFile failed', e); }
@@ -559,6 +1082,10 @@
     createFileSearchWidget,
     createFileChangesWidget,
     createFileEditWidget,
+    createSubtaskProgressWidget,
+    createDualityModeWidget,
+    createPrimaryDecisionWidget,
+    updateSubtaskProgress,
     // Helper to add widgets to messages
     addWidgetToMessage: (messageNode, widget) => {
       if (messageNode && widget) {
@@ -585,6 +1112,81 @@
       try { if (vscode) vscode.postMessage({ command: 'setAutoPilot', enabled: autopilotToggle.checked }); } catch (e) { console.error('post setAutoPilot failed', e); }
     });
   }
+
+  // Create and wire an option to allow autopilot to run terminal commands
+  function ensureAutoPilotTerminalOption() {
+    try {
+      const optionsRoot = document.getElementById('options-dropdown');
+      if (!optionsRoot) return;
+
+      // Avoid creating twice
+      if (document.getElementById('autopilot-terminal-option')) return;
+
+      const row = document.createElement('div');
+      row.id = 'autopilot-terminal-option';
+      row.className = 'px-3 py-2 text-sm text-gray-200 flex items-center justify-between';
+
+      const label = document.createElement('div');
+      label.style.display = 'flex';
+      label.style.flexDirection = 'column';
+      label.innerHTML = `
+        <span style="font-weight:600;">Allow autopilot to run terminal commands</span>
+        <span style="font-size:11px;color:#9aa7b2;">When enabled, autopilot may execute terminal tool-calls automatically.</span>
+      `;
+
+      const control = document.createElement('input');
+      control.type = 'checkbox';
+      control.id = 'autopilot-terminal-toggle';
+      control.style.width = '18px';
+      control.style.height = '18px';
+
+      control.addEventListener('change', () => {
+        try {
+          const enabled = Boolean(control.checked);
+          if (vscode) vscode.postMessage({ command: 'setAutoPilotTerminalExecution', enabled });
+        } catch (e) { console.error('post setAutoPilotTerminalExecution failed', e); }
+      });
+
+      row.appendChild(label);
+      row.appendChild(control);
+
+      // Try to place this option directly below the Cerebras Reasoning row if it exists
+      let inserted = false;
+      try {
+        // Common ids or data attributes that might identify the Cerebras row
+        const cerebrasRow = optionsRoot.querySelector('#cerebras-reasoning-row, #set-cerebras-reasoning, [data-setting="cerebras-reasoning"]');
+        if (cerebrasRow && cerebrasRow.parentNode === optionsRoot) {
+          optionsRoot.insertBefore(row, cerebrasRow.nextSibling);
+          inserted = true;
+        } else {
+          // fallback: search for an element containing the word 'Cerebras' in its text
+          const children = Array.from(optionsRoot.children || []);
+          for (let i = 0; i < children.length; i++) {
+            const ch = children[i];
+            try {
+              if (ch && ch.textContent && ch.textContent.toLowerCase().includes('cerebras')) {
+                optionsRoot.insertBefore(row, ch.nextSibling);
+                inserted = true;
+                break;
+              }
+            } catch (e) { /* ignore read errors */ }
+          }
+        }
+      } catch (e) {
+        console.error('Insertion search for cerebras row failed', e);
+      }
+
+      if (!inserted) optionsRoot.appendChild(row);
+
+      // Request current state from host (host may send back autoPilotTerminalChanged message)
+      try { if (vscode) vscode.postMessage({ command: 'getAutoPilotTerminalExecution' }); } catch (e) { }
+    } catch (e) {
+      console.error('Failed to create autopilot terminal option', e);
+    }
+  }
+
+  // Ensure the option is available when the webview initializes
+  try { ensureAutoPilotTerminalOption(); } catch (e) { console.error('ensureAutoPilotTerminalOption init failed', e); }
 
   // Update assistant message footers - only show after conversation ends
   function updateAssistantFooters(conversationEnded = false) {
@@ -1011,6 +1613,515 @@
     }
   }
 
+  // Helper to create a terminal confirmation widget for legacy mode
+  function createTerminalConfirmationWidget(toolCall, todoId) {
+    try {
+      // Wrap in a structure like code-widget-wrapper for consistent margins/width
+      const outerWrapper = document.createElement('div');
+      outerWrapper.className = 'code-widget-wrapper'; // Reuse for alignment
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'terminal-tool-widget';
+      
+      // Header with terminal icon and label
+      const header = document.createElement('div');
+      header.className = 'terminal-lang-label';
+      header.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M20,19V7H4V19H20M20,3A2,2 0 0,1 22,5V19A2,2 0 0,1 20,21H4A2,2 0 0,1 2,19V5C2,3.89 2.9,3 4,3H20M13,17V15H18V17H13M9.58,13L5.57,9H8.4L11.7,12.3C12.09,12.69 12.09,13.33 11.7,13.72L8.42,17H5.59L9.58,13Z"/>
+        </svg>
+        Command
+      `;
+      
+      const command = toolCall.args && toolCall.args.command ? String(toolCall.args.command) : (toolCall.args && toolCall.args.cmd ? String(toolCall.args.cmd) : '');
+      const pre = document.createElement('pre');
+      pre.className = 'terminal-cmd';
+      pre.textContent = command;
+      
+      const controls = document.createElement('div');
+      controls.className = 'terminal-controls';
+      
+      const runBtn = document.createElement('button');
+      runBtn.type = 'button';
+      runBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+        </svg>
+      `;
+      runBtn.className = 'run-btn';
+      runBtn.title = 'Run Command';
+      
+      const skipBtn = document.createElement('button');
+      skipBtn.type = 'button';
+      skipBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+        </svg>
+      `;
+      skipBtn.className = 'skip-btn';
+      skipBtn.title = 'Skip Command';
+      
+      const out = document.createElement('div');
+      out.className = 'terminal-output';
+      out.textContent = 'Waiting for user approval...'; // Initial message
+
+      controls.appendChild(runBtn);
+      controls.appendChild(skipBtn);
+      if (todoId) try { wrapper.dataset.requestId = todoId; } catch {}
+      wrapper.appendChild(header);
+      wrapper.appendChild(pre);
+      wrapper.appendChild(controls);
+      wrapper.appendChild(out);
+      outerWrapper.appendChild(wrapper);
+
+      // Wire actions for confirmation
+      runBtn.addEventListener('click', () => {
+        try {
+          out.textContent = 'Executing command...';
+          runBtn.disabled = true;
+          skipBtn.disabled = true;
+          
+          // Send confirmation to extension
+          if (vscode) {
+            vscode.postMessage({ 
+              command: 'legacyModeConfirmationResponse', 
+              todoId: todoId,
+              approved: true,
+              feedback: null
+            });
+          }
+        } catch (e) { 
+          console.error('terminal confirmation approval failed', e); 
+          out.textContent = 'Failed to approve command.';
+        }
+      });
+      
+      skipBtn.addEventListener('click', () => {
+        try {
+          out.textContent = 'Command skipped by user.';
+          runBtn.disabled = true;
+          skipBtn.disabled = true;
+          
+          // Send confirmation to extension
+          if (vscode) {
+            vscode.postMessage({ 
+              command: 'legacyModeConfirmationResponse', 
+              todoId: todoId,
+              approved: false,
+              feedback: null
+            });
+          }
+        } catch (e) { 
+          console.error('terminal confirmation skip failed', e); 
+          out.textContent = 'Failed to skip command.';
+        }
+      });
+
+      return { widget: outerWrapper }; // Return outer for consistent styling
+    } catch (e) { 
+      console.error('createTerminalConfirmationWidget failed', e); 
+      return null; 
+    }
+  }
+
+  // Create duality mode widget with model names and subtasks
+  function createDualityModeWidget(subtasks, requestId, primaryModelId, secondaryModelId, primaryDecision) {
+    try {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'duality-mode-widget';
+      wrapper.dataset.requestId = requestId || '';
+      
+      // Header with model information
+      const header = document.createElement('div');
+      header.className = 'duality-mode-header';
+      
+      const icon = document.createElement('div');
+      icon.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z"/>
+        </svg>
+      `;
+      
+      const title = document.createElement('div');
+      title.className = 'duality-mode-title';
+      // Use compact badges for primary and secondary models with small icons
+      title.innerHTML = `
+        <div class="duality-title">Duality Mode Execution</div>
+        <div class="model-info badged">
+          <div class="model-badge primary">
+            <div class="model-icon"> 
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2L2 7l10 5 10-5-10-5zm0 6l-8-4 8 4 8-4-8 4zm0 8l-8-4v6l8 4 8-4v-6l-8 4z"/></svg>
+            </div>
+            <div class="model-label">Primary</div>
+            <div class="model-id" title="${primaryModelId}">${String(primaryModelId).split('/').pop()}</div>
+          </div>
+          <div class="model-badge secondary">
+            <div class="model-icon"> 
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM11 6h2v6h-2zM11 14h2v2h-2z"/></svg>
+            </div>
+            <div class="model-label">Secondary</div>
+            <div class="model-id" title="${secondaryModelId}">${String(secondaryModelId).split('/').pop()}</div>
+          </div>
+        </div>
+      `;
+      
+      header.appendChild(icon);
+      header.appendChild(title);
+      
+      // Primary decision display
+      const decisionSection = document.createElement('div');
+      decisionSection.className = 'primary-decision-section';
+      decisionSection.innerHTML = `
+        <div class="decision-header">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24">
+            <path fill="currentColor" d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+          </svg>
+          <span>Primary Model Decision</span>
+        </div>
+        <div class="decision-content">
+          <div class="decision-result ${primaryDecision.needsSubtasks ? 'subdivide' : 'direct'}">
+            ${primaryDecision.needsSubtasks ? 'Task will be subdivided into steps' : 'Task will be executed directly'}
+          </div>
+          <div class="decision-reasoning">${primaryDecision.reasoning}</div>
+        </div>
+      `;
+      
+      // Progress indicator
+      const progressIndicator = document.createElement('div');
+      progressIndicator.className = 'subtask-progress-indicator';
+      
+      const progressBar = document.createElement('div');
+      progressBar.className = 'subtask-progress-bar';
+      
+      const progressFill = document.createElement('div');
+      progressFill.className = 'subtask-progress-fill';
+      progressFill.style.width = '0%';
+      
+      const progressText = document.createElement('span');
+      progressText.className = 'subtask-progress-text';
+      progressText.textContent = `0/${subtasks.length}`;
+      
+      progressBar.appendChild(progressFill);
+      progressIndicator.appendChild(progressBar);
+      progressIndicator.appendChild(progressText);
+      
+      // Subtask list
+      const subtaskList = document.createElement('div');
+      subtaskList.className = 'subtask-list';
+      
+      if (subtasks && Array.isArray(subtasks)) {
+        subtasks.forEach((subtask, index) => {
+          const item = document.createElement('div');
+          item.className = 'subtask-item';
+          item.dataset.subtaskIndex = index;
+          
+          const status = document.createElement('div');
+          status.className = 'subtask-status pending';
+          status.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+              <path fill="currentColor" d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z" opacity="0.3"/>
+            </svg>
+          `;
+          
+          const text = document.createElement('div');
+          text.className = 'subtask-text';
+          text.textContent = subtask.displayText || `Step ${index + 1}`;
+          
+          const stepNumber = document.createElement('div');
+          stepNumber.className = 'subtask-step-number';
+          stepNumber.textContent = `${index + 1}`;
+          
+          item.appendChild(stepNumber);
+          item.appendChild(status);
+          item.appendChild(text);
+          subtaskList.appendChild(item);
+        });
+      }
+      
+      wrapper.appendChild(header);
+      wrapper.appendChild(decisionSection);
+      wrapper.appendChild(progressIndicator);
+      wrapper.appendChild(subtaskList);
+      
+      return wrapper;
+    } catch (e) {
+      console.error('Error creating duality mode widget:', e);
+      return null;
+    }
+  }
+
+  // New simplified subtask widget inspired by terminal widget UI
+  function createSubtaskWidget(subtasks, requestId) {
+    try {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'subtask-widget';
+      wrapper.dataset.requestId = requestId || '';
+
+      const header = document.createElement('div');
+      header.className = 'subtask-header';
+
+      const title = document.createElement('div');
+      title.className = 'subtask-title';
+      title.textContent = `Subtasks (${subtasks.length})`;
+
+      const actions = document.createElement('div');
+      actions.className = 'subtask-actions';
+
+      header.appendChild(title);
+      header.appendChild(actions);
+
+      const list = document.createElement('div');
+      list.className = 'subtask-list';
+
+      subtasks.forEach((st, idx) => {
+        const item = document.createElement('div');
+        item.className = 'subtask-item pending';
+        item.dataset.subtaskIndex = idx;
+
+        const icon = document.createElement('div');
+        icon.className = 'subtask-status-icon';
+        icon.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2A10 10 0 1 0 12 22A10 10 0 0 0 12 2Z" opacity="0.2"/></svg>
+        `;
+
+        const text = document.createElement('div');
+        text.className = 'subtask-text';
+        text.textContent = st.displayText || `Step ${idx + 1}`;
+
+        item.appendChild(icon);
+        item.appendChild(text);
+        list.appendChild(item);
+      });
+
+      const progWrap = document.createElement('div');
+      progWrap.className = 'subtask-progress';
+      const progBar = document.createElement('div'); progBar.className = 'subtask-progress-bar';
+      const progFill = document.createElement('div'); progFill.className = 'subtask-progress-fill'; progBar.appendChild(progFill);
+      const progText = document.createElement('div'); progText.className = 'subtask-progress-text small'; progText.textContent = `0/${subtasks.length}`;
+      progWrap.appendChild(progBar); progWrap.appendChild(progText);
+
+      wrapper.appendChild(header);
+      wrapper.appendChild(list);
+      wrapper.appendChild(progWrap);
+
+      return wrapper;
+    } catch (e) {
+      console.error('createSubtaskWidget failed', e);
+      return null;
+    }
+  }
+
+  // Create primary decision widget for simple tasks
+  function createPrimaryDecisionWidget(requestId, primaryModelId, secondaryModelId, primaryDecision) {
+    try {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'primary-decision-widget';
+      wrapper.dataset.requestId = requestId || '';
+      
+      // Header with model information
+      const header = document.createElement('div');
+      header.className = 'duality-mode-header';
+      
+      const icon = document.createElement('div');
+      icon.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6M12,8A4,4 0 0,1 16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 12,8Z"/>
+        </svg>
+      `;
+      
+      const title = document.createElement('div');
+      title.className = 'duality-mode-title';
+      title.innerHTML = `
+        <div class="duality-title">Duality Mode Analysis</div>
+        <div class="model-info">
+          <span class="primary-model">Primary: ${primaryModelId}</span>
+          <span class="model-separator">•</span>
+          <span class="secondary-model">Secondary: ${secondaryModelId}</span>
+        </div>
+      `;
+      
+      header.appendChild(icon);
+      header.appendChild(title);
+      
+      // Primary decision display
+      const decisionSection = document.createElement('div');
+      decisionSection.className = 'primary-decision-section';
+      decisionSection.innerHTML = `
+        <div class="decision-header">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24">
+            <path fill="currentColor" d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+          </svg>
+          <span>Primary Model Decision</span>
+        </div>
+        <div class="decision-content">
+          <div class="decision-result ${primaryDecision.needsSubtasks ? 'subdivide' : 'direct'}">
+            ${primaryDecision.needsSubtasks ? 'Task will be subdivided into steps' : 'Task will be executed directly'}
+          </div>
+          <div class="decision-reasoning">${primaryDecision.reasoning}</div>
+          <div class="execution-note">Executing with primary model...</div>
+        </div>
+      `;
+      
+      wrapper.appendChild(header);
+      wrapper.appendChild(decisionSection);
+      
+      return wrapper;
+    } catch (error) {
+      console.error('Error creating primary decision widget:', error);
+      return null;
+    }
+  }
+
+  // Legacy createSubtaskProgressWidget function for compatibility
+  function createSubtaskProgressWidget(subtasks, requestId) {
+    // This is now a wrapper that calls the new duality mode widget
+    return createDualityModeWidget(subtasks, requestId, 'Unknown', 'Unknown', { needsSubtasks: true, reasoning: 'Legacy widget' });
+  }
+
+  // Update subtask progress widget
+  function updateSubtaskProgress(requestId, subtaskIndex, status, progressData) {
+    try {
+      // Support both the detailed duality widget and the new simplified subtask-widget
+      const widget = container.querySelector(`.duality-mode-widget[data-request-id="${String(requestId)}"], .subtask-progress-widget[data-request-id="${String(requestId)}"], .subtask-widget[data-request-id="${String(requestId)}"]`);
+      if (!widget) return;
+
+      const subtaskItem = widget.querySelector(`.subtask-item[data-subtask-index="${subtaskIndex}"]`);
+      if (!subtaskItem) return;
+
+      // For the legacy widget, the status element uses .subtask-status. For the new widget, we update the icon container.
+      const statusEl = subtaskItem.querySelector('.subtask-status') || subtaskItem.querySelector('.subtask-status-icon');
+      if (!statusEl) return;
+      
+      // Remove old status classes
+      statusEl.classList.remove('pending', 'in-progress', 'completed', 'failed');
+      subtaskItem.classList.remove('pending', 'in-progress', 'completed', 'failed');
+      
+      // Add new status
+  statusEl.classList.add(status);
+  subtaskItem.classList.add(status);
+      
+      // Update status icon
+      let iconSvg = '';
+      switch (status) {
+        case 'pending':
+          iconSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+              <path fill="currentColor" d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z" opacity="0.3"/>
+            </svg>
+          `;
+          break;
+        case 'in-progress':
+          iconSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+              <path fill="currentColor" d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z"/>
+            </svg>
+          `;
+          break;
+        case 'completed':
+          iconSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+              <path fill="currentColor" d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+            </svg>
+          `;
+          break;
+        case 'failed':
+          iconSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24">
+              <path fill="currentColor" d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
+            </svg>
+          `;
+          break;
+      }
+  // Update the inner HTML if applicable
+  try { statusEl.innerHTML = iconSvg; } catch (e) {}
+      
+      // Update overall progress
+      if (progressData) {
+        const progressFill = widget.querySelector('.subtask-progress-fill');
+        const progressText = widget.querySelector('.subtask-progress-text');
+
+        if (progressFill && progressData.percentage !== undefined) {
+          progressFill.style.width = `${progressData.percentage}%`;
+        }
+
+        if (progressText && progressData.completed !== undefined && progressData.total !== undefined) {
+          progressText.textContent = `${progressData.completed}/${progressData.total}`;
+        }
+      }
+
+      // Track active duality subtasks so send-button remains disabled until all subtasks complete
+      try {
+        if (!activeDualitySubtasks[requestId]) {
+          // initialize if possible
+          activeDualitySubtasks[requestId] = { total: progressData.total || null, completed: progressData.completed || 0 };
+        } else {
+          if (progressData.total !== undefined) activeDualitySubtasks[requestId].total = progressData.total;
+          if (progressData.completed !== undefined) activeDualitySubtasks[requestId].completed = progressData.completed;
+        }
+
+        // When a subtask is in-progress, show a more specific loading message
+        if (status === 'in-progress') {
+          const total = activeDualitySubtasks[requestId].total || (progressData.total || 0);
+          const stepTextEl = widget.querySelector(`.subtask-item[data-subtask-index="${subtaskIndex}"] .subtask-text`);
+          const stepText = stepTextEl ? (stepTextEl.textContent || stepTextEl.innerText || '').trim() : '';
+          const loadingMsg = stepText ? `Executing: Step ${subtaskIndex + 1}/${total}: ${stepText}` : `Executing: Step ${subtaskIndex + 1}/${total}`;
+          showLoadingState(loadingMsg);
+          // Also ensure the global loading node shows the same short message
+          try { setLoading(true, {}, loadingMsg); } catch (e) {}
+        }
+
+        // If completed equals total, finish this duality run
+        if (activeDualitySubtasks[requestId] && activeDualitySubtasks[requestId].total && activeDualitySubtasks[requestId].completed >= activeDualitySubtasks[requestId].total) {
+          // mark completed and cleanup
+          try {
+            delete activeDualitySubtasks[requestId];
+          } catch (e) {}
+          // Only clear the loading/send-button state when all subtasks are done
+          cleanupCurrentRequest();
+          setLoading(false);
+          markConversationEnded();
+        }
+      } catch (e) { /* ignore tracking errors */ }
+      
+      // Scroll to keep widget visible
+      widget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      
+    } catch (e) {
+      console.error('Error updating subtask progress:', e);
+    }
+  }
+
+  // Test function for subtask widget (can be removed later)
+  function testSubtaskWidget() {
+    const testSubtasks = [
+      { displayText: "Analyze project structure" },
+      { displayText: "Generate implementation plan" },
+      { displayText: "Create base components" }
+    ];
+    
+    const widget = createSubtaskProgressWidget(testSubtasks, 'test-123');
+    if (widget && container) {
+      const messageNode = appendMessage('assistant', '', {}, 'test-widget', false);
+      if (messageNode) {
+        const textEl = messageNode.querySelector('.message-text');
+        if (textEl) {
+          textEl.appendChild(widget);
+          
+          // Test progress updates
+          setTimeout(() => updateSubtaskProgress('test-123', 0, 'in-progress', { completed: 0, total: 3, percentage: 0 }), 1000);
+          setTimeout(() => updateSubtaskProgress('test-123', 0, 'completed', { completed: 1, total: 3, percentage: 33 }), 2000);
+          setTimeout(() => updateSubtaskProgress('test-123', 1, 'in-progress', { completed: 1, total: 3, percentage: 33 }), 3000);
+          setTimeout(() => updateSubtaskProgress('test-123', 1, 'completed', { completed: 2, total: 3, percentage: 67 }), 4000);
+          setTimeout(() => updateSubtaskProgress('test-123', 2, 'in-progress', { completed: 2, total: 3, percentage: 67 }), 5000);
+          setTimeout(() => updateSubtaskProgress('test-123', 2, 'completed', { completed: 3, total: 3, percentage: 100 }), 6000);
+        }
+      }
+    }
+  }
+
+  // Expose test function globally for debugging (can be removed later)
+  window.testSubtaskWidget = testSubtaskWidget;
+
   // Listen for messages from extension host
   window.addEventListener('message', (ev) => {
     const msg = ev.data || {};
@@ -1055,19 +2166,53 @@
       case 'promptResponse': {
         try {
           const rid = msg.requestId;
+          
+          // Handle error responses
+          if (msg.error) {
+            if (currentRequestId === rid) {
+              handleRequestError(rid, msg.error, { type: 'response_error', recoverable: true });
+            }
+            break;
+          }
+          
+          // Handle successful responses
           const text = (msg.response && (msg.response.plain_text || msg.response.text)) || msg.text || '';
           const meta = (msg.response && msg.response.metadata) || msg.meta || { model: msg.modelId, mode: msg.modeId };
+          
+          // Check for error in response data
+          if (msg.response && msg.response.hasError) {
+            if (currentRequestId === rid) {
+              handleRequestError(rid, text || 'Request failed', { 
+                type: msg.response.raw?.type || 'execution_error', 
+                recoverable: msg.response.raw?.recoverable !== false 
+              });
+            }
+            break;
+          }
+          
           const updated = rid ? updateAssistantNode(rid, text, meta) : null;
           if (!updated) {
             appendMessage('assistant', text, meta, rid);
           }
+          
           if (msg.final || (msg.response && msg.response.done)) {
+            // Clean up current request if this is our active request
+            if (currentRequestId === rid) {
+              cleanupCurrentRequest();
+            }
+            
             setLoading(false, meta);
             // Mark conversation as ended to show footer
             markConversationEnded();
+            
+            // Clear any error states on successful completion
+            clearErrorStates();
           }
         } catch (e) {
           console.error('promptResponse error', e);
+          if (msg.requestId && currentRequestId === msg.requestId) {
+            handleRequestError(msg.requestId, 'Failed to process response', { type: 'client_error', recoverable: true });
+          }
         }
         break;
       }
@@ -1108,6 +2253,112 @@
           } catch (e) { console.error('terminalCommandSkipped handler failed', e); }
           break;
         }
+
+        case 'assistantMessage': {
+          try {
+            const rid = msg.requestId;
+            const text = msg.text || '';
+            const meta = msg.metadata || {};
+            const toolsCalled = msg.tools_called || [];
+            
+            // Create assistant message with tools
+            const updated = rid ? updateAssistantNode(rid, text, meta) : null;
+            if (!updated) {
+              const node = appendMessage('assistant', text, meta, rid);
+              
+              // Add terminal widgets for commands requiring confirmation
+              if (node && toolsCalled.length > 0) {
+                const textEl = node.querySelector('.message-text');
+                if (textEl) {
+                  toolsCalled.forEach((tc, index) => {
+                    if (tc.requiresConfirmation && 
+                        (tc.tool === 'terminal_command' || tc.tool === 'terminalcommand' || tc.tool === 'execute_command')) {
+                      const todoId = `terminal_${rid}_${index}`;
+                      const tcCopy = Object.assign({}, tc);
+                      tcCopy.requestId = todoId;
+                      const tw = createTerminalConfirmationWidget(tcCopy, todoId);
+                      if (tw && tw.widget) {
+                        textEl.appendChild(tw.widget);
+                      }
+                    }
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            console.error('assistantMessage error', e);
+          }
+          break;
+        }
+
+        case 'dualityModeError': {
+          try {
+            const rid = msg.requestId;
+            const errorData = msg.errorData || {};
+            
+            console.warn('Duality mode error:', errorData);
+            
+            // Handle different types of errors
+            switch (errorData.type) {
+              case 'primary_model_retry':
+                showRetryIndicator(rid, errorData.message, errorData.retryAttempt, errorData.maxRetries);
+                break;
+              case 'primary_model_fallback':
+              case 'fallback_success':
+                showValidationMessage(errorData.message, 'warning');
+                break;
+              case 'configuration_error':
+              case 'complete_failure':
+                if (currentRequestId === rid) {
+                  handleRequestError(rid, errorData.message, errorData);
+                }
+                break;
+              default:
+                if (currentRequestId === rid && !errorData.recoverable) {
+                  handleRequestError(rid, errorData.message, errorData);
+                } else {
+                  showValidationMessage(errorData.message, 'warning');
+                }
+                break;
+            }
+          } catch (e) {
+            console.error('dualityModeError handler error', e);
+          }
+          break;
+        }
+
+        case 'terminalConfirmationsComplete': {
+          try {
+            const rid = msg.requestId;
+            const toolsCalled = msg.tools_called || [];
+            
+            // Update any existing terminal widgets with final results
+            toolsCalled.forEach((tc, index) => {
+              if (tc.tool === 'terminal_command' || tc.tool === 'terminalcommand' || tc.tool === 'execute_command') {
+                const todoId = `terminal_${rid}_${index}`;
+                const widget = container.querySelector(`.terminal-tool-widget[data-request-id="${todoId}"]`);
+                if (widget) {
+                  const outEl = widget.querySelector('.terminal-output');
+                  if (outEl) {
+                    if (tc.skipped) {
+                      outEl.textContent = 'Command skipped by user.';
+                    } else if (tc.success) {
+                      outEl.textContent = tc.output || 'Command completed successfully.';
+                    } else {
+                      outEl.textContent = tc.error || 'Command failed.';
+                    }
+                  }
+                }
+              }
+            });
+            
+            setLoading(false);
+            markConversationEnded();
+          } catch (e) {
+            console.error('terminalConfirmationsComplete error', e);
+          }
+          break;
+        }
       
       case 'setLoading':
         setLoading(Boolean(msg.loading), msg.meta || {});
@@ -1121,6 +2372,8 @@
         clearMessages();
         setSelectedModel('');
         setSelectedMode('');
+        setSelectedPrimaryModel('');
+        setSelectedSecondaryModel('');
         break;
         
       case 'showNotification':
@@ -1286,6 +2539,191 @@
         } catch (e) { console.error('autoPilotChanged handler error', e); }
         break;
       }
+      case 'autoPilotTerminalChanged': {
+        try {
+          const enabled = Boolean(msg.enabled);
+          const control = document.getElementById('autopilot-terminal-toggle');
+          if (control) control.checked = enabled;
+        } catch (e) { console.error('autoPilotTerminalChanged handler error', e); }
+        break;
+      }
+
+      case 'dualityModeSubtasksCreated': {
+        try {
+          const rid = msg.requestId;
+          const subtasks = msg.subtasks || [];
+          const primaryModelId = msg.primaryModelId;
+          const secondaryModelId = msg.secondaryModelId;
+          const primaryDecision = msg.primaryDecision;
+          
+          console.log('Duality Mode: Subtasks created', subtasks);
+          
+          // Prefer a simplified subtask widget inspired by the terminal widget
+          const subtaskWidget = createSubtaskWidget(subtasks, rid);
+          if (subtaskWidget) {
+            const assistantMsgs = container ? container.querySelectorAll('.assistant-message') : [];
+            let node = assistantMsgs && assistantMsgs.length ? assistantMsgs[assistantMsgs.length - 1] : null;
+            if (!node) node = appendMessage('assistant', '', {}, rid);
+            if (node) {
+              const textEl = node.querySelector('.message-text');
+              if (textEl) {
+                textEl.appendChild(subtaskWidget);
+                container.scrollTop = container.scrollHeight;
+              }
+            }
+          } else {
+            // Fallback to the more detailed duality widget
+            const dualityWidget = createDualityModeWidget(subtasks, rid, primaryModelId, secondaryModelId, primaryDecision);
+            if (dualityWidget) {
+              const assistantMsgs = container ? container.querySelectorAll('.assistant-message') : [];
+              let node = assistantMsgs && assistantMsgs.length ? assistantMsgs[assistantMsgs.length - 1] : null;
+              if (!node) node = appendMessage('assistant', '', {}, rid);
+              if (node) {
+                const textEl = node.querySelector('.message-text');
+                if (textEl) {
+                  textEl.appendChild(dualityWidget);
+                  container.scrollTop = container.scrollHeight;
+                }
+              }
+            }
+          }
+
+          // Track that subtasks exist for this request and keep send-button/loading active
+          try {
+            activeDualitySubtasks[rid] = { total: subtasks.length || 0, completed: 0 };
+            // Provide an initial loading message
+            const initialMsg = subtasks.length > 0 ? `Preparing ${subtasks.length} subtasks...` : 'Preparing subtasks...';
+            showLoadingState(initialMsg);
+            setLoading(true, {}, initialMsg);
+          } catch (e) { /* ignore */ }
+        } catch (e) {
+          console.error('dualityModeSubtasksCreated handler error', e);
+        }
+        break;
+      }
+
+      case 'dualityModePrimaryDecision': {
+        try {
+          const rid = msg.requestId;
+          const primaryModelId = msg.primaryModelId;
+          const secondaryModelId = msg.secondaryModelId;
+          const primaryDecision = msg.primaryDecision;
+          
+          console.log('Duality Mode: Primary decision', primaryDecision);
+          
+          // Create decision widget showing the primary model's analysis
+          const decisionWidget = createPrimaryDecisionWidget(rid, primaryModelId, secondaryModelId, primaryDecision);
+          if (decisionWidget) {
+            // Find the latest assistant message or create one
+            const assistantMsgs = container ? container.querySelectorAll('.assistant-message') : [];
+            let node = assistantMsgs && assistantMsgs.length ? assistantMsgs[assistantMsgs.length - 1] : null;
+            
+            if (!node) {
+              // Create a new assistant message for the decision
+              node = appendMessage('assistant', '', {}, rid);
+            }
+            
+            if (node) {
+              const textEl = node.querySelector('.message-text');
+              if (textEl) {
+                textEl.appendChild(decisionWidget);
+                container.scrollTop = container.scrollHeight;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('dualityModePrimaryDecision handler error', e);
+        }
+        break;
+      }
+
+      case 'dualityModeProgress': {
+        try {
+          const rid = msg.requestId;
+          const progressData = msg.progressData || {};
+          
+          console.log('Duality Mode: Progress update', progressData);
+          // Update existing subtask progress widget
+          if (progressData.type === 'subtask_progress') {
+            updateSubtaskProgress(rid, progressData.subtaskIndex, progressData.status, progressData);
+          }
+
+          // Keep the widget sticky and update messages inside the widget rather than posting global chat notifications
+          if (progressData.type === 'subtask_started') {
+            // Ensure widget exists and update progress bar
+            updateSubtaskProgress(rid, 0, 'pending', { completed: 0, total: progressData.totalSubtasks, percentage: 0 });
+          } else if (progressData.type === 'subtask_progress') {
+            // Update text/status in widget only
+            updateSubtaskProgress(rid, progressData.subtaskIndex, progressData.status, progressData);
+          } else if (progressData.type === 'subtask_completed') {
+            const completed = progressData.completed || 0;
+            const failed = progressData.failed || 0;
+            const total = progressData.totalSubtasks || 0;
+
+            // Update final state inside the widget: show completion badge and final progress
+            const widget = container.querySelector(`.duality-mode-widget[data-request-id="${String(rid)}"]`);
+            if (widget) {
+              const progressFill = widget.querySelector('.subtask-progress-fill');
+              const progressText = widget.querySelector('.subtask-progress-text');
+              if (progressFill) progressFill.style.width = `${progressData.percentage || 100}%`;
+              if (progressText) progressText.textContent = `${completed}/${total}`;
+
+              // Add a completion badge inside the widget header
+              let badge = widget.querySelector('.duality-completion-badge');
+              if (!badge) {
+                badge = document.createElement('div');
+                badge.className = 'duality-completion-badge';
+                badge.innerHTML = `
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                  <span>${failed === 0 ? 'All subtasks completed' : `${completed}/${total} completed (${failed} failed)`}</span>
+                `;
+                widget.querySelector('.duality-mode-header') && widget.querySelector('.duality-mode-header').appendChild(badge);
+              } else {
+                badge.querySelector('span') && (badge.querySelector('span').textContent = failed === 0 ? 'All subtasks completed' : `${completed}/${total} completed (${failed} failed)`);
+              }
+            }
+
+            // Clean up current request only if our tracking shows all subtasks done
+            try {
+              const tracking = activeDualitySubtasks[rid];
+              const completed = progressData.completed || 0;
+              const total = progressData.totalSubtasks || (tracking && tracking.total) || 0;
+
+              if (tracking) {
+                // update tracking then decide
+                tracking.completed = completed;
+                tracking.total = tracking.total || total;
+              }
+
+              const allDone = (tracking && tracking.total && tracking.completed >= tracking.total) || (total && completed >= total);
+
+              if (allDone) {
+                try { delete activeDualitySubtasks[rid]; } catch (e) {}
+                if (currentRequestId === rid) {
+                  cleanupCurrentRequest();
+                }
+                setLoading(false);
+                markConversationEnded();
+              } else {
+                // Still running - keep loading state visible but update text to final progress
+                const loadingMsg = `Subtasks: ${completed}/${total}`;
+                showLoadingState(loadingMsg);
+                try { setLoading(true, {}, loadingMsg); } catch (e) {}
+              }
+            } catch (e) {
+              console.error('dualityModeProgress finalize error', e);
+              // fallback: clear loading
+              try { delete activeDualitySubtasks[rid]; } catch (e) {}
+              if (currentRequestId === rid) cleanupCurrentRequest();
+              setLoading(false);
+              markConversationEnded();
+            }
+          }
+        } catch (e) {
+          console.error('dualityModeProgress handler error', e);
+        }
+        break;
+      }
       
       default:
         break;
@@ -1299,6 +2737,9 @@
     });
     window.addEventListener('vsx-setCerebrasReasoning', () => {
       try { if (vscode) vscode.postMessage({ command: 'setCerebrasReasoning' }); } catch (e) { console.error('forward setCerebrasReasoning failed', e); }
+    });
+    window.addEventListener('vsx-setDualitySubtaskMode', () => {
+      try { if (vscode) vscode.postMessage({ command: 'setDualitySubtaskMode' }); } catch (e) { console.error('forward setDualitySubtaskMode failed', e); }
     });
   } catch (e) {
     console.error('Failed to attach vsx DOM event forwarders', e);
@@ -1359,14 +2800,33 @@
         const text = inputTa.value.trim();
         if (!text) return;
         
-        if (!selectedModel) {
-          showNotification('Please select a model first or configure API keys');
-          return;
+        if (selectedMode === 'duality') {
+          if (!selectedPrimaryModel || !selectedSecondaryModel) {
+            showNotification('Please select both primary and secondary models for Duality mode');
+            return;
+          }
+        } else {
+          if (!selectedModel) {
+            showNotification('Please select a model first or configure API keys');
+            return;
+          }
         }
         
         const requestId = String(Date.now()) + Math.random().toString(36).slice(2,8);
-        appendMessage('user', text, { model: selectedModel, mode: selectedMode }, requestId);
-        setLoading(true, { model: selectedModel, mode: selectedMode });
+        
+        if (selectedMode === 'duality') {
+          appendMessage('user', text, { 
+            model: `${selectedPrimaryModel} + ${selectedSecondaryModel}`, 
+            mode: selectedMode 
+          }, requestId);
+          setLoading(true, { 
+            model: `${selectedPrimaryModel} + ${selectedSecondaryModel}`, 
+            mode: selectedMode 
+          });
+        } else {
+          appendMessage('user', text, { model: selectedModel, mode: selectedMode }, requestId);
+          setLoading(true, { model: selectedModel, mode: selectedMode });
+        }
         inputTa.value = '';
         // Reset textarea height
         inputTa.style.height = 'auto';
@@ -1394,14 +2854,22 @@
             }
           } catch { }
 
-          vscode.postMessage({ 
+          const messageData = { 
             command: 'sendPrompt', 
             prompt: text, 
             requestId, 
-            modelId: selectedModel, 
             modeId: selectedMode,
             previous_chat_history: chatNodes
-          });
+          };
+          
+          if (selectedMode === 'duality') {
+            messageData.primaryModelId = selectedPrimaryModel;
+            messageData.secondaryModelId = selectedSecondaryModel;
+          } else {
+            messageData.modelId = selectedModel;
+          }
+          
+          vscode.postMessage(messageData);
         } catch (e) {
           console.error('postMessage failed', e);
           setLoading(false);
@@ -1419,19 +2887,68 @@
       if (!inputTa) return;
       
       const text = inputTa.value.trim();
-      if (!text) return;
+      if (!text) {
+        showValidationMessage('Please enter a message', 'warning');
+        inputTa.focus();
+        return;
+      }
       
-      if (!selectedModel) {
-        showNotification('Please select a model first or configure API keys');
+      // Clear any existing validation messages
+      clearValidationMessage();
+      
+      // Comprehensive validation for Duality mode
+      if (selectedMode === 'duality') {
+        if (!selectedPrimaryModel || selectedPrimaryModel.trim() === '') {
+          showValidationMessage('Please select a primary model for Duality mode', 'error');
+          return;
+        }
+        if (!selectedSecondaryModel || selectedSecondaryModel.trim() === '') {
+          showValidationMessage('Please select a secondary model for Duality mode', 'error');
+          return;
+        }
+        if (selectedPrimaryModel === selectedSecondaryModel) {
+          showValidationMessage('Primary and secondary models should be different for optimal results', 'warning');
+          // Allow to continue but warn user
+        }
+      } else {
+        if (!selectedModel || selectedModel.trim() === '') {
+          showValidationMessage('Please select a model first or configure API keys', 'error');
+          return;
+        }
+      }
+      
+      // Check if already processing a request
+      if (loadingNode) {
+        showValidationMessage('Please wait for the current request to complete', 'warning');
         return;
       }
       
       const requestId = String(Date.now()) + Math.random().toString(36).slice(2,8);
-      appendMessage('user', text, { model: selectedModel, mode: selectedMode }, requestId);
-      setLoading(true, { model: selectedModel, mode: selectedMode });
+      
+      // Show loading state immediately
+      showLoadingState('Sending...');
+      
+      if (selectedMode === 'duality') {
+        appendMessage('user', text, { 
+          model: `${selectedPrimaryModel} + ${selectedSecondaryModel}`, 
+          mode: selectedMode 
+        }, requestId);
+        setLoading(true, { 
+          model: `${selectedPrimaryModel} + ${selectedSecondaryModel}`, 
+          mode: selectedMode 
+        });
+      } else {
+        appendMessage('user', text, { model: selectedModel, mode: selectedMode }, requestId);
+        setLoading(true, { model: selectedModel, mode: selectedMode });
+      }
+      
+      // Clear input and reset height
       inputTa.value = '';
-      // Reset textarea height
       inputTa.style.height = 'auto';
+      
+      // Store current request for potential cancellation
+      currentRequestId = requestId;
+      currentRequestStartTime = Date.now();
       
       try {
         // Collect visible chat messages (role + text) from the DOM
@@ -1456,18 +2973,37 @@
           }
         } catch { }
 
-        vscode.postMessage({ 
+        const messageData = { 
           command: 'sendPrompt', 
           prompt: text, 
           requestId, 
-          modelId: selectedModel, 
           modeId: selectedMode,
           previous_chat_history: chatNodes
-        });
+        };
+        
+        if (selectedMode === 'duality') {
+          messageData.primaryModelId = selectedPrimaryModel;
+          messageData.secondaryModelId = selectedSecondaryModel;
+        } else {
+          messageData.modelId = selectedModel;
+        }
+        
+        // Set a timeout for the request (5 minutes for complex tasks)
+        const timeoutDuration = selectedMode === 'duality' ? 300000 : 120000; // 5 min for duality, 2 min for others
+        requestTimeout = setTimeout(() => {
+          if (currentRequestId === requestId) {
+            handleRequestTimeout(requestId);
+          }
+        }, timeoutDuration);
+        
+        vscode.postMessage(messageData);
+        
+        // Update loading state
+        showLoadingState(selectedMode === 'duality' ? 'Analyzing task...' : 'Processing...');
+        
       } catch (e) {
         console.error('postMessage failed', e);
-        setLoading(false);
-        showNotification('Failed to send message');
+        handleRequestError(requestId, 'Failed to send message: ' + e.message);
       }
     });
   }

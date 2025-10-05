@@ -84,6 +84,12 @@
           "enum": ["low","medium","high"],
           "scope": "application"
         },
+        "vsx.duality.forceSubtasks": {
+          "type": "boolean",
+          "default": false,
+          "description": "Force duality mode to always create subtasks instead of letting the primary model decide",
+          "scope": "application"
+        },
         "vsx.autopilot.enabled": {
           "type": "boolean",
           "default": false,

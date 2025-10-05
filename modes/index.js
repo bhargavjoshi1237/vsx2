@@ -1,8 +1,9 @@
 // For now we register modes statically. This loader makes it easy to expand later.
 const ask = require('./ask');
 const legacy = require('./legacy');
+const duality = require('./duality');
 
-const MODES = [ask, legacy];
+const MODES = [ask, legacy, duality];
 
 function listModes() {
   return MODES.map(m => ({ id: m.id, name: m.name, tagline: m.tagline || '' }));

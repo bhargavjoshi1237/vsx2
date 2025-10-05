@@ -205,13 +205,16 @@ body {
 /* Loading animation improvements */
 .loading-node {
   animation: fadeIn 0.3s ease-out;
-  margin: 0.5rem 0;
+  margin: 0;
   padding: 0 1rem;
 }
 
 #global-loading {
-  margin: 0.75rem 1rem;
+  margin: 0 1rem;
   padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .loading-inner {
@@ -219,6 +222,23 @@ body {
   align-items: center;
   gap: 0.5rem;
   margin-left: 0.5rem;
+}
+
+/* Stop button styling (red, matches run-btn shape) */
+.stop-btn {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.04);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.stop-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.3);
 }
 
 @keyframes fadeIn {
@@ -733,6 +753,319 @@ body {
   font-style: italic;
 }
 
+/* Duality Mode Widget Styles */
+.duality-mode-widget, .primary-decision-widget {
+  background: #212121;
+  border: 1px solid #474747;
+  border-radius: 6px;
+  margin: 0.5rem 0; /* tighten vertical spacing */
+  overflow: hidden;
+}
+
+.duality-mode-header {
+  background: linear-gradient(135deg, #2a2a2a 0%, #323232 100%);
+  padding: 12px 16px;
+  border-bottom: 1px solid #474747;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.duality-mode-header svg {
+  width: 16px;
+  height: 16px;
+  color: #60a5fa;
+}
+
+.duality-mode-title {
+  flex: 1;
+}
+
+.duality-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6eef6;
+  margin-bottom: 4px;
+}
+
+.model-info.badged {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.model-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.02);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.03);
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.model-badge .model-icon svg {
+  width: 12px;
+  height: 12px;
+  color: #9fb4ff;
+}
+
+.model-badge.primary .model-icon svg { color: #60a5fa; }
+.model-badge.secondary .model-icon svg { color: #34d399; }
+
+.model-badge .model-id {
+  color: #e6eef6;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* Reduce gap between messages and overall vertical rhythm */
+.message {
+  margin-bottom: 0.5rem;
+}
+
+.chat-messages { padding: 0 12px; }
+
+.primary-decision-section {
+  background: #1a1a1a;
+  padding: 12px 16px;
+  border-bottom: 1px solid #474747;
+}
+
+.decision-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #e6eef6;
+}
+
+.decision-header svg {
+  width: 14px;
+  height: 14px;
+  color: #22c55e;
+}
+
+.decision-content {
+  margin-left: 22px;
+}
+
+.decision-result {
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.decision-result.subdivide {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.decision-result.direct {
+  background: rgba(34, 197, 94, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.decision-reasoning {
+  font-size: 11px;
+  color: #9aa7b2;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.execution-note {
+  font-size: 10px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* Subtask Progress Widget Styles (Legacy) */
+.subtask-progress-widget {
+  background: #212121;
+  border: 1px solid #474747;
+  border-radius: 6px;
+  margin: 1rem 0;
+  overflow: hidden;
+}
+
+.subtask-progress-header {
+  background: #2a2a2a;
+  padding: 8px 12px;
+  border-bottom: 1px solid #474747;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #9aa7b2;
+}
+
+.subtask-progress-header svg {
+  width: 12px;
+  height: 12px;
+}
+
+.subtask-progress-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.subtask-progress-bar {
+  width: 60px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.subtask-progress-fill {
+  height: 100%;
+  background: #86efac;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.subtask-progress-text {
+  font-size: 10px;
+  color: #9aa7b2;
+  font-family: monospace;
+}
+
+.subtask-list {
+  padding: 8px 0;
+}
+
+.subtask-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #e6eef6;
+  transition: background-color 0.2s ease;
+  gap: 10px;
+}
+
+.subtask-step-number {
+  width: 20px;
+  height: 20px;
+  background: #374151;
+  color: #9ca3af;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.subtask-item.in-progress .subtask-step-number {
+  background: #3b82f6;
+  color: white;
+}
+
+.subtask-item.completed .subtask-step-number {
+  background: #22c55e;
+  color: white;
+}
+
+/* New simplified subtask widget (modern, terminal-inspired) */
+.subtask-widget {
+  background: #212121;
+  border: 1px solid #474747;
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: #e6eef6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace;
+  max-width: 100%;
+  margin: 0.75rem 0;
+}
+.subtask-widget .subtask-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.subtask-widget .subtask-title { font-weight: 600; color: #e6eef6; font-size: 13px; }
+.subtask-widget .subtask-list { padding: 6px 0; }
+.subtask-widget .subtask-item { display:flex; align-items:center; gap:10px; padding:6px 0; font-size:13px; }
+.subtask-widget .subtask-status-icon { width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; }
+.subtask-widget .subtask-text { flex:1; color:#dbeafe; }
+.subtask-widget .subtask-text.small { font-size:12px; color:#9aa7b2; }
+.subtask-progress { display:flex; align-items:center; gap:8px; margin-top:8px; }
+.subtask-progress-bar { flex:1; height:6px; background: rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; }
+.subtask-progress-fill { height:100%; background: #86efac; width:0%; transition: width 0.3s ease; }
+
+
+.subtask-item.failed .subtask-step-number {
+  background: #ef4444;
+  color: white;
+}
+
+.subtask-item.in-progress {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.subtask-item.completed {
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.subtask-item.failed {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.subtask-status {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.subtask-status.pending {
+  color: #6b7280;
+}
+
+.subtask-status.in-progress {
+  color: #3b82f6;
+  animation: spin 1s linear infinite;
+}
+
+.subtask-status.completed {
+  color: #22c55e;
+}
+
+.subtask-status.failed {
+  color: #ef4444;
+}
+
+.subtask-text {
+  flex: 1;
+  line-height: 1.3;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Stats Tooltip */
 .stats-tooltip {
   position: absolute;
@@ -760,3 +1093,204 @@ body {
   border: 4px solid transparent;
   border-top-color: #1f2937;
 }
+/* Validation message styles */
+.validation-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  animation: slideIn 0.3s ease-out;
+}
+
+.validation-message.info {
+  background-color: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
+}
+
+.validation-message.warning {
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+
+.validation-message.error {
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.validation-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.validation-text {
+  flex: 1;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Loading spinner styles */
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #333;
+  border-top: 2px solid #fff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Enhanced send button styles */
+#send-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+#send-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5 !important;
+}
+
+#send-btn:not(:disabled):hover {
+  background-color: #4a5568;
+  transform: translateY(-1px);
+}
+
+/* Progress indicator for duality mode */
+.duality-progress-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 8px 12px;
+  background-color: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #93c5fd;
+}
+
+.duality-progress-bar {
+  flex: 1;
+  height: 4px;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.duality-progress-fill {
+  height: 100%;
+  background-color: #3b82f6;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Error state styles */
+.error-state {
+  padding: 12px;
+  margin: 8px 12px;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  color: #fca5a5;
+}
+
+.error-state-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.error-state-message {
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.error-state-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.error-action-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  background-color: transparent;
+  color: #fca5a5;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.error-action-btn:hover {
+  background-color: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.7);
+}
+
+/* Retry indicator */
+.retry-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin: 4px 12px;
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 4px;
+  font-size: 11px;
+  color: #fbbf24;
+}
+
+.retry-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-top: 1px solid #fbbf24;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Completion badge inside duality widget header */
+.duality-completion-badge {
+  margin-left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.02);
+  border-radius: 6px;
+  color: #cfe8ff;
+  font-size: 12px;
+}
+.duality-completion-badge svg { width: 12px; height: 12px; color: #86efac }
+
+/* subtle fix: keep subtask widget sticky inside assistant messages (no global removal) */
+.assistant-message .duality-mode-widget { position: relative; }

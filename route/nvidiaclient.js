@@ -71,6 +71,18 @@ const modelConfigs = {
     stream: true,
     reasoning_effort: "medium",
   },
+  "nvidia/nvidia-nemotron-nano-9b-v2": {
+    path: "/v1/chat/completions",
+    temperature: 0.6,
+    top_p: 0.95,
+    max_tokens: 2048,
+    min_thinking_tokens: 1024,
+    max_thinking_tokens: 2048,
+    frequency_penalty: 0,
+    presence_penalty: 0,
+    stream: true,
+    add_system_think: true,
+  },
 };
 
 function findConfig(modelId) {
@@ -212,8 +224,8 @@ function getModels() {
       provider: "nvidia",
     },
     {
-      id: "nvidia/nvidia-nemotron-nano-9b-v2",
-      name: "NVIDIA Nemotron Nano 9B V2",
+      id: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      name: "NVIDIA Nemotron 49B V1.5",
       provider: "nvidia",
     },
     {
@@ -226,6 +238,11 @@ function getModels() {
       name: "GPT-OSS 20B (openai) via NVIDIA",
       provider: "nvidia",
     },
+    {
+      id: "nvidia/nvidia-nemotron-nano-9b-v2",
+      name: "NVIDIA Nemotron Nano 9B V2",
+      provider: "nvidia",
+    }
   ];
 }
 
