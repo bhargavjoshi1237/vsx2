@@ -1368,6 +1368,8 @@
         appendMessage('user', text, { model: selectedModel, mode: selectedMode }, requestId);
         setLoading(true, { model: selectedModel, mode: selectedMode });
         inputTa.value = '';
+        // Reset textarea height
+        inputTa.style.height = 'auto';
         
         try {
           // Collect visible chat messages (role + text) from the DOM
@@ -1405,6 +1407,67 @@
           setLoading(false);
           showNotification('Failed to send message');
         }
+      }
+    });
+  }
+
+  // Send button integration
+  const sendBtn = document.getElementById('send-btn');
+  if (sendBtn && vscode) {
+    sendBtn.addEventListener('click', () => {
+      const inputTa = document.getElementById('inputTextArea');
+      if (!inputTa) return;
+      
+      const text = inputTa.value.trim();
+      if (!text) return;
+      
+      if (!selectedModel) {
+        showNotification('Please select a model first or configure API keys');
+        return;
+      }
+      
+      const requestId = String(Date.now()) + Math.random().toString(36).slice(2,8);
+      appendMessage('user', text, { model: selectedModel, mode: selectedMode }, requestId);
+      setLoading(true, { model: selectedModel, mode: selectedMode });
+      inputTa.value = '';
+      // Reset textarea height
+      inputTa.style.height = 'auto';
+      
+      try {
+        // Collect visible chat messages (role + text) from the DOM
+        const chatNodes = [];
+        try {
+          const allNodes = [];
+          if (container) {
+            const children = Array.from(container.children || []);
+            for (const c of children) {
+              if (c.classList && (c.classList.contains('user-message') || c.classList.contains('assistant-message'))) {
+                allNodes.push(c);
+              }
+            }
+          }
+          for (const n of allNodes) {
+            try {
+              const role = n.classList.contains('user-message') ? 'user' : 'assistant';
+              const textEl = n.querySelector('.message-text');
+              const txt = textEl ? (textEl.innerText || textEl.textContent || '') : '';
+              if (txt && String(txt).trim().length) chatNodes.push({ role, text: String(txt).trim() });
+            } catch { }
+          }
+        } catch { }
+
+        vscode.postMessage({ 
+          command: 'sendPrompt', 
+          prompt: text, 
+          requestId, 
+          modelId: selectedModel, 
+          modeId: selectedMode,
+          previous_chat_history: chatNodes
+        });
+      } catch (e) {
+        console.error('postMessage failed', e);
+        setLoading(false);
+        showNotification('Failed to send message');
       }
     });
   }

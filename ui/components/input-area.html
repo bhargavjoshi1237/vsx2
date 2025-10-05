@@ -1,380 +1,508 @@
-<div class="input-area bg-dark-secondary min-h-[250px] rounded-md w-[90%] ml-3 mr-3 mb-3 bg-[#313131] p-2 flex items-center space-x-2"
-    style="max-height: 1000px; overflow: visible">
-    <div class="w-full flex flex-col justify-between h-full">
-        <div class="flex-shrink-0">
-            <div class="flex items-center w-full  ">
-                <div class="flex items-center gap-2">
-                    <button id="attachFileBtn"
-                        class="rounded-md  gap-2 p-1 px-2 flex items-center justify-center cursor-pointer "
-                        style="background-color: #474747; border: 1px solid #5a5a5a;"
-                        title="Attach Files">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
-                            <path fill="currentColor"
-                                d="M15 22H6c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h8l6 6v6h-2V9h-5V4H6v16h9zm4-.34v-2.24l2.95 2.95l1.41-1.41L20.41 18h2.24v-2H17v5.66z" />
-                        </svg>
-                        <p class="text-[6px]">Attach</p>
-                    </button>
+<div
+  class="input-area bg-dark-secondary min-h-[250px] rounded-md w-[90%] ml-3 mr-3 mb-3 bg-[#313131] p-2 flex items-center space-x-2"
+  style="max-height: 1000px; overflow: visible"
+>
+  <div class="w-full flex flex-col justify-between h-full">
+    <div class="flex-shrink-0">
+      <div class="flex items-center w-full">
+        <div class="flex items-center gap-2">
+          <button
+            id="attachFileBtn"
+            class="rounded-md gap-2 p-1 px-2 flex items-center justify-center cursor-pointer"
+            style="background-color: #474747; border: 1px solid #5a5a5a"
+            title="Attach Files"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+            >
+              <path
+                fill="currentColor"
+                d="M15 22H6c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h8l6 6v6h-2V9h-5V4H6v16h9zm4-.34v-2.24l2.95 2.95l1.41-1.41L20.41 18h2.24v-2H17v5.66z"
+              />
+            </svg>
+          </button>
 
-                    <!-- Working Indicator -->
-                    <div id="working-indicator"
-                        class="hidden items-center gap-2 px-2 py-1 rounded-md bg-blue-600/20 border border-blue-500/30">
-                        <svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="12" height="12"
-                            viewBox="0 0 24 24">
-                            <path fill="currentColor"
-                                d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
-                                opacity=".25" />
-                            <path fill="currentColor"
-                                d="M12,4a8,8,0,0,1,7.89,6.7A1.53,1.53,0,0,0,21.38,12h0a1.5,1.5,0,0,0,1.48-1.75,11,11,0,0,0-21.72,0A1.5,1.5,0,0,0,2.62,12h0a1.53,1.53,0,0,0,1.49-1.3A8,8,0,0,1,12,4Z">
-                                <animateTransform attributeName="transform" dur="0.75s" repeatCount="indefinite"
-                                    type="rotate" values="0 12 12;360 12 12" />
-                            </path>
-                        </svg>
-                        <span class="text-xs text-blue-300">Working...</span>
-                    </div>
-                </div>
-<div class="ml-auto flex gap-3 items-center">
-                    <button id="send-btn "
-                        class="text-[#e7e7e7] rounded-md  p-1 bg-[#282828] hover:bg-[#363636] transition-colors"
-                        title="Send Message">
-                       <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-        >
-          <path
-            fill="currentColor"
-            d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65A.49.49 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1a.6.6 0 0 0-.18-.03c-.17 0-.34.09-.43.25l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46a.5.5 0 0 0 .61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1q.09.03.18.03c.17 0 .34-.09.43-.25l2-3.46c.12-.22.07-.49-.12-.64zm-1.98-1.71c.04.31.05.52.05.73s-.02.43-.05.73l-.14 1.13l.89.7l1.08.84l-.7 1.21l-1.27-.51l-1.04-.42l-.9.68c-.43.32-.84.56-1.25.73l-1.06.43l-.16 1.13l-.2 1.35h-1.4l-.19-1.35l-.16-1.13l-1.06-.43c-.43-.18-.83-.41-1.23-.71l-.91-.7l-1.06.43l-1.27.51l-.7-1.21l1.08-.84l.89-.7l-.14-1.13c-.03-.31-.05-.54-.05-.74s.02-.43.05-.73l.14-1.13l-.89-.7l-1.08-.84l.7-1.21l1.27.51l1.04.42l.9-.68c.43-.32.84-.56 1.25-.73l1.06-.43l.16-1.13l.2-1.35h1.39l.19 1.35l.16 1.13l1.06.43c.43.18.83.41 1.23.71l.91.7l1.06-.43l1.27-.51l.7 1.21l-1.07.85l-.89.7zM12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4s4-1.79 4-4s-1.79-4-4-4m0 6c-1.1 0-2-.9-2-2s.9-2 2-2s2 .9 2 2s-.9 2-2 2"
-          />
-        </svg>
-                    </button>
-                </div>
-                <div class="ml-2 flex gap-3 items-center">
-                    <button id="send-btn "
-                        class="text-[#e7e7e7]  rounded-md  p-1 bg-[#282828] hover:bg-[#363636] transition-colors"
-                        title="Send Message">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
-                            <path fill="currentColor" d="M2.01 21L23 12L2.01 3L2 10l15 2l-15 2z" />
-                        </svg>
-                    </button>
-                </div>
-            </div>
+          <!-- Working Indicator -->
+          <div
+            id="working-indicator"
+            class="hidden items-center gap-2 px-2 py-1 rounded-md bg-blue-600/20 border border-blue-500/30"
+          >
+            <svg
+              class="animate-spin"
+              xmlns="http://www.w3.org/2000/svg"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+            >
+              <path
+                fill="currentColor"
+                d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z"
+                opacity=".25"
+              />
+              <path
+                fill="currentColor"
+                d="M12,4a8,8,0,0,1,7.89,6.7A1.53,1.53,0,0,0,21.38,12h0a1.5,1.5,0,0,0,1.48-1.75,11,11,0,0,0-21.72,0A1.5,1.5,0,0,0,2.62,12h0a1.53,1.53,0,0,0,1.49-1.3A8,8,0,0,1,12,4Z"
+              >
+                <animateTransform
+                  attributeName="transform"
+                  dur="0.75s"
+                  repeatCount="indefinite"
+                  type="rotate"
+                  values="0 12 12;360 12 12"
+                />
+              </path>
+            </svg>
+            <span class="text-xs text-blue-300">Working...</span>
+          </div>
         </div>
-        <div class="w-full flex-grow overflow-auto max-h-[700px]">
-            <textarea id="inputTextArea"
-                class="w-full p-2 mb-1 bg-transparent text-[#e7e7e7] rounded resize-none outline-none text-sm"
-                placeholder="Type your message here...">
-Show Css Class example</textarea>
+        <div class="ml-auto flex gap-3 items-center">
+          <button
+            id="send-btn"
+            class="text-[#e7e7e7] rounded-md p-2 bg-[#282828] hover:bg-[#363636] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Send Message"
+          >
+            <!-- Normal send icon -->
+            <svg
+              id="send-icon"
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+            >
+              <path
+                fill="currentColor"
+                d="M2.01 21L23 12L2.01 3L2 10l15 2l-15 2z"
+              />
+            </svg>
+            <!-- Loading icon (hidden by default) -->
+            <svg
+              id="loading-icon"
+              class="hidden"
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+            >
+              <rect width="6" height="14" x="1" y="4" fill="currentColor">
+                <animate
+                  id="SVGBoZ3Ab9F"
+                  fill="freeze"
+                  attributeName="y"
+                  begin="0;SVG0XJl4OCs.end-0.25s"
+                  dur="0.75s"
+                  values="1;5"
+                />
+                <animate
+                  fill="freeze"
+                  attributeName="height"
+                  begin="0;SVG0XJl4OCs.end-0.25s"
+                  dur="0.75s"
+                  values="22;14"
+                />
+                <animate
+                  fill="freeze"
+                  attributeName="opacity"
+                  begin="0;SVG0XJl4OCs.end-0.25s"
+                  dur="0.75s"
+                  values="1;.2"
+                />
+              </rect>
+              <rect
+                width="6"
+                height="14"
+                x="9"
+                y="4"
+                fill="currentColor"
+                opacity=".4"
+              >
+                <animate
+                  fill="freeze"
+                  attributeName="y"
+                  begin="SVGBoZ3Ab9F.begin+0.15s"
+                  dur="0.75s"
+                  values="1;5"
+                />
+                <animate
+                  fill="freeze"
+                  attributeName="height"
+                  begin="SVGBoZ3Ab9F.begin+0.15s"
+                  dur="0.75s"
+                  values="22;14"
+                />
+                <animate
+                  fill="freeze"
+                  attributeName="opacity"
+                  begin="SVGBoZ3Ab9F.begin+0.15s"
+                  dur="0.75s"
+                  values="1;.2"
+                />
+              </rect>
+              <rect
+                width="6"
+                height="14"
+                x="17"
+                y="4"
+                fill="currentColor"
+                opacity=".3"
+              >
+                <animate
+                  id="SVG0XJl4OCs"
+                  fill="freeze"
+                  attributeName="y"
+                  begin="SVGBoZ3Ab9F.begin+0.3s"
+                  dur="0.75s"
+                  values="1;5"
+                />
+                <animate
+                  fill="freeze"
+                  attributeName="height"
+                  begin="SVGBoZ3Ab9F.begin+0.3s"
+                  dur="0.75s"
+                  values="22;14"
+                />
+                <animate
+                  fill="freeze"
+                  attributeName="opacity"
+                  begin="SVGBoZ3Ab9F.begin+0.3s"
+                  dur="0.75s"
+                  values="1;.2"
+                />
+              </rect>
+            </svg>
+          </button>
         </div>
-        <div class="flex items-center flex-shrink-0 ml-2">
-            <div class="w-full flex gap-2 items-center">
-                <div x-data="{ open: false, selected: 'Ask' }" class="relative" id="mode-dropdown">
-                    <button @click="open = !open" @click.away="open = false"
-                        class="text-xs text-[#e7e7e7] focus:outline-none" :aria-expanded="open.toString()">
-                        <span x-text="selected"></span>
-                    </button>
-                    <div x-show="open" x-transition:enter="transition ease-out duration-100"
-                        x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
-                        x-transition:leave="transition ease-in duration-75"
-                        x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                        class="absolute bottom-full mb-2 w-48 rounded-md shadow-lg border  overflow-hidden z-50"
-                        style="display: none; background-color: #363636; border:#474747;">
-                        <ul class="text-sm text-gray-200" id="mode-list">
-                            <li class="px-3 py-2 text-gray-400 text-center flex items-center justify-center space-x-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
-                                    class="animate-spin">
-                                    <path fill="currentColor"
-                                        d="M10.72,19.9a8,8,0,0,1-6.5-9.79A7.77,7.77,0,0,1,10.4,4.16a8,8,0,0,1,9.49,6.52A1.54,1.54,0,0,0,21.38,12h.13a1.37,1.37,0,0,0,1.38-1.54,11,11,0,1,0-12.7,12.39A1.54,1.54,0,0,0,12,21.34h0A1.47,1.47,0,0,0,10.72,19.9Z">
-                                        <animateTransform attributeName="transform" dur="0.75s" repeatCount="indefinite"
-                                            type="rotate" values="0 12 12;360 12 12" />
-                                    </path>
-                                </svg>
-                                <span>Loading modes...</span>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="mx-2 text-xs">|</div>
-                <!-- Converted Radix Dropdown to Tailwind HTML -->
-                <div x-data="{ open: false, selected: 'Loading Models...' }" class="relative" id="model-dropdown">
-                    <button @click="open = !open" @click.away="open = false"
-                        class="text-xs text-[#e7e7e7] focus:outline-none" :aria-expanded="open.toString()">
-                        <span x-text="selected"></span>
-                    </button>
-                    <div x-show="open" x-transition:enter="transition ease-out duration-100"
-                        x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
-                        x-transition:leave="transition ease-in duration-75"
-                        x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                        class="absolute bottom-full mb-2 w-64  rounded-md shadow-lg border border-gray-600 overflow-hidden z-50"
-                        style="display: none; background-color: #363636; border:#474747;">
-                        <ul class="text-sm text-gray-200 max-h-48 overflow-y-auto" id="model-list">
-                            <!-- Models will be populated dynamically -->
-                            <li class="px-3 py-2 text-gray-400 text-center flex items-center justify-center space-x-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
-                                    class="animate-spin">
-                                    <path fill="currentColor"
-                                        d="M10.72,19.9a8,8,0,0,1-6.5-9.79A7.77,7.77,0,0,1,10.4,4.16a8,8,0,0,1,9.49,6.52A1.54,1.54,0,0,0,21.38,12h.13a1.37,1.37,0,0,0,1.38-1.54,11,11,0,1,0-12.7,12.39A1.54,1.54,0,0,0,12,21.34h0A1.47,1.47,0,0,0,10.72,19.9Z">
-                                        <animateTransform attributeName="transform" dur="0.75s" repeatCount="indefinite"
-                                            type="rotate" values="0 12 12;360 12 12" />
-                                    </path>
-                                </svg>
-                                <span>Loading models...</span>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-            <div class="ml-auto flex items-center mr-1">
-                <label for="autopilot-toggle"
-                    title="Auto Pilot: allow assistant to apply file changes without confirmation"
-                    class="flex items-center gap-3 cursor-pointer select-none text-sm text-gray-300 hover:text-white">
-                    <div class="relative">
-                        <input id="autopilot-toggle" type="checkbox" class="sr-only peer" />
-                        <div id="autopilot-track"
-                            class="w-10 h-5 bg-gray-600 rounded-full transition-colors duration-300"></div>
-                        <div id="autopilot-thumb"
-                            class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-md transition-transform duration-300">
-                        </div>
-                    </div>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
-
-                        <path fill="currentColor"
-                            d="M19.03 3.56c-1.67-1.39-3.74-2.3-6.03-2.51v2.01c1.73.19 3.31.88 4.61 1.92zM11 3.06V1.05c-2.29.2-4.36 1.12-6.03 2.51l1.42 1.42A8.93 8.93 0 0 1 11 3.06M4.98 6.39L3.56 4.97C2.17 6.64 1.26 8.71 1.05 11h2.01c.19-1.73.88-3.31 1.92-4.61M20.94 11h2.01c-.21-2.29-1.12-4.36-2.51-6.03l-1.42 1.42A8.93 8.93 0 0 1 20.94 11M7 12l3.44 1.56L12 17l1.56-3.44L17 12l-3.44-1.56L12 7l-1.56 3.44z" />
-                        <path fill="currentColor"
-                            d="M12 21a8.96 8.96 0 0 1-7.46-4H7v-2H1v6h2v-2.7c1.99 2.84 5.27 4.7 9 4.7c4.87 0 9-3.17 10.44-7.56l-1.96-.45C19.25 18.48 15.92 21 12 21" />
-                    </svg>
-                </label>
-            </div>
-        </div>
+      </div>
     </div>
+    <div class="w-full flex-grow overflow-auto max-h-[700px]">
+      <textarea
+        id="inputTextArea"
+        class="w-full p-2 mb-1 bg-transparent text-[#e7e7e7] rounded resize-none outline-none text-sm"
+        placeholder="Type your message here..."
+      ></textarea>
+    </div>
+    <div class="flex items-center flex-shrink-0 ml-2">
+      <div class="w-full flex gap-2 items-center">
+        <div
+          x-data="{ open: false, selected: 'Ask' }"
+          class="relative"
+          id="mode-dropdown"
+        >
+          <button
+            @click="open = !open"
+            @click.away="open = false"
+            class="text-xs text-[#e7e7e7] focus:outline-none"
+            :aria-expanded="open.toString()"
+          >
+            <span x-text="selected"></span>
+          </button>
+          <div
+            x-show="open"
+            x-transition:enter="transition ease-out duration-100"
+            x-transition:enter-start="opacity-0 scale-95"
+            x-transition:enter-end="opacity-100 scale-100"
+            x-transition:leave="transition ease-in duration-75"
+            x-transition:leave-start="opacity-100 scale-100"
+            x-transition:leave-end="opacity-0 scale-95"
+            class="absolute bottom-full mb-2 w-48 rounded-md shadow-lg border overflow-hidden z-50"
+            style="display: none; background-color: #363636; border: #474747"
+          >
+            <ul class="text-sm text-gray-200" id="mode-list">
+              <li
+                class="px-3 py-2 text-gray-400 text-center flex items-center justify-center space-x-2"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  class="animate-spin"
+                >
+                  <path
+                    fill="currentColor"
+                    d="M10.72,19.9a8,8,0,0,1-6.5-9.79A7.77,7.77,0,0,1,10.4,4.16a8,8,0,0,1,9.49,6.52A1.54,1.54,0,0,0,21.38,12h.13a1.37,1.37,0,0,0,1.38-1.54,11,11,0,1,0-12.7,12.39A1.54,1.54,0,0,0,12,21.34h0A1.47,1.47,0,0,0,10.72,19.9Z"
+                  >
+                    <animateTransform
+                      attributeName="transform"
+                      dur="0.75s"
+                      repeatCount="indefinite"
+                      type="rotate"
+                      values="0 12 12;360 12 12"
+                    />
+                  </path>
+                </svg>
+                <span>Loading modes...</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+        <div class="mx-2 text-xs">|</div>
+        <!-- Converted Radix Dropdown to Tailwind HTML -->
+        <div
+          x-data="{ open: false, selected: 'Loading Models...' }"
+          class="relative"
+          id="model-dropdown"
+        >
+          <button
+            @click="open = !open"
+            @click.away="open = false"
+            class="text-xs text-[#e7e7e7] focus:outline-none"
+            :aria-expanded="open.toString()"
+          >
+            <span x-text="selected"></span>
+          </button>
+          <div
+            x-show="open"
+            x-transition:enter="transition ease-out duration-100"
+            x-transition:enter-start="opacity-0 scale-95"
+            x-transition:enter-end="opacity-100 scale-100"
+            x-transition:leave="transition ease-in duration-75"
+            x-transition:leave-start="opacity-100 scale-100"
+            x-transition:leave-end="opacity-0 scale-95"
+            class="absolute bottom-full mb-2 w-64 rounded-md shadow-lg border border-gray-600 overflow-hidden z-50"
+            style="display: none; background-color: #363636; border: #474747"
+          >
+            <ul
+              class="text-sm text-gray-200 max-h-48 overflow-y-auto"
+              id="model-list"
+            >
+              <!-- Models will be populated dynamically -->
+              <li
+                class="px-3 py-2 text-gray-400 text-center flex items-center justify-center space-x-2"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  class="animate-spin"
+                >
+                  <path
+                    fill="currentColor"
+                    d="M10.72,19.9a8,8,0,0,1-6.5-9.79A7.77,7.77,0,0,1,10.4,4.16a8,8,0,0,1,9.49,6.52A1.54,1.54,0,0,0,21.38,12h.13a1.37,1.37,0,0,0,1.38-1.54,11,11,0,1,0-12.7,12.39A1.54,1.54,0,0,0,12,21.34h0A1.47,1.47,0,0,0,10.72,19.9Z"
+                  >
+                    <animateTransform
+                      attributeName="transform"
+                      dur="0.75s"
+                      repeatCount="indefinite"
+                      type="rotate"
+                      values="0 12 12;360 12 12"
+                    />
+                  </path>
+                </svg>
+                <span>Loading models...</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="ml-auto flex items-center mr-1">
+        <label
+          for="autopilot-toggle"
+          title="Auto Pilot: allow assistant to apply file changes without confirmation"
+          class="flex items-center gap-3 cursor-pointer select-none text-sm text-gray-300 hover:text-white"
+        >
+          <div class="relative">
+            <input id="autopilot-toggle" type="checkbox" class="sr-only peer" />
+            <div
+              id="autopilot-track"
+              class="w-10 h-5 bg-gray-600 rounded-full transition-colors duration-300"
+            ></div>
+            <div
+              id="autopilot-thumb"
+              class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-md transition-transform duration-300"
+            ></div>
+          </div>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+          >
+            <path
+              fill="currentColor"
+              d="M19.03 3.56c-1.67-1.39-3.74-2.3-6.03-2.51v2.01c1.73.19 3.31.88 4.61 1.92zM11 3.06V1.05c-2.29.2-4.36 1.12-6.03 2.51l1.42 1.42A8.93 8.93 0 0 1 11 3.06M4.98 6.39L3.56 4.97C2.17 6.64 1.26 8.71 1.05 11h2.01c.19-1.73.88-3.31 1.92-4.61M20.94 11h2.01c-.21-2.29-1.12-4.36-2.51-6.03l-1.42 1.42A8.93 8.93 0 0 1 20.94 11M7 12l3.44 1.56L12 17l1.56-3.44L17 12l-3.44-1.56L12 7l-1.56 3.44z"
+            />
+            <path
+              fill="currentColor"
+              d="M12 21a8.96 8.96 0 0 1-7.46-4H7v-2H1v6h2v-2.7c1.99 2.84 5.27 4.7 9 4.7c4.87 0 9-3.17 10.44-7.56l-1.96-.45C19.25 18.48 15.92 21 12 21"
+            />
+          </svg>
+        </label>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- You need to include Alpine.js for the dropdown to be interactive -->
-<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<script
+  src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+  defer
+></script>
 <script>
-    // Add toggle logic for autopilot
-    (() => {
-        const input = document.getElementById("autopilot-toggle");
-        const track = document.getElementById("autopilot-track");
-        const thumb = document.getElementById("autopilot-thumb");
-        function updateToggle() {
-            if (input.checked) {
-                track.classList.add("bg-[#474747]");
-                track.classList.remove("bg-gray-600");
-                thumb.style.transform = "translateX(20px)";
-            } else {
-                track.classList.remove("bg-[#474747]");
-                track.classList.add("bg-gray-600");
-                thumb.style.transform = "translateX(0)";
-            }
-        }
-        if (input) {
-            input.addEventListener("change", updateToggle);
-            updateToggle();
-        }
-    })();
+  // Add toggle logic for autopilot
+  (() => {
+    const input = document.getElementById("autopilot-toggle");
+    const track = document.getElementById("autopilot-track");
+    const thumb = document.getElementById("autopilot-thumb");
+    function updateToggle() {
+      if (input.checked) {
+        track.classList.add("bg-[#474747]");
+        track.classList.remove("bg-gray-600");
+        thumb.style.transform = "translateX(20px)";
+      } else {
+        track.classList.remove("bg-[#474747]");
+        track.classList.add("bg-gray-600");
+        thumb.style.transform = "translateX(0)";
+      }
+    }
+    if (input) {
+      input.addEventListener("change", updateToggle);
+      updateToggle();
+    }
+  })();
 </script>
 <script>
-    // Autosize textarea while allowing the container to grow until 1000px
-    (() => {
-        const textarea = document.getElementById("inputTextArea");
-        const container = document.querySelector(".input-area");
-        if (!textarea || !container) return;
+  // Autosize textarea while allowing the container to grow until 1000px
+  (() => {
+    const textarea = document.getElementById("inputTextArea");
+    const container = document.querySelector(".input-area");
+    if (!textarea || !container) return;
 
-        const maxContainerHeight = 250; // px
+    const maxContainerHeight = 250; // px
 
-        function resize() {
-            textarea.style.height = "auto";
-            const taHeight = textarea.scrollHeight;
+    function resize() {
+      textarea.style.height = "auto";
+      const taHeight = textarea.scrollHeight;
 
-            // compute available space inside the container: we only grow the textarea while
-            // the container height is less than maxContainerHeight
-            const containerRect = container.getBoundingClientRect();
-            const currentContainerHeight = containerRect.height;
+      // compute available space inside the container: we only grow the textarea while
+      // the container height is less than maxContainerHeight
+      const containerRect = container.getBoundingClientRect();
+      const currentContainerHeight = containerRect.height;
 
-            if (currentContainerHeight < maxContainerHeight) {
-                // set textarea to its scrollHeight so it expands
-                textarea.style.height = taHeight + "px";
-                // after expanding, if container exceeds max, lock textarea and enable container scroll
-                if (container.getBoundingClientRect().height > maxContainerHeight) {
-                    textarea.style.height =
-                        taHeight -
-                        (container.getBoundingClientRect().height - maxContainerHeight) +
-                        "px";
-                }
-            } else {
-                // container already at max - cap textarea and allow scrolling
-                textarea.style.height = Math.min(taHeight, 200) + "px";
-            }
+      if (currentContainerHeight < maxContainerHeight) {
+        // set textarea to its scrollHeight so it expands
+        textarea.style.height = taHeight + "px";
+        // after expanding, if container exceeds max, lock textarea and enable container scroll
+        if (container.getBoundingClientRect().height > maxContainerHeight) {
+          textarea.style.height =
+            taHeight -
+            (container.getBoundingClientRect().height - maxContainerHeight) +
+            "px";
         }
+      } else {
+        // container already at max - cap textarea and allow scrolling
+        textarea.style.height = Math.min(taHeight, 200) + "px";
+      }
+    }
 
-        textarea.addEventListener("input", resize);
-        // initial resize
-        setTimeout(resize, 0);
-    })();
+    textarea.addEventListener("input", resize);
+    // initial resize
+    setTimeout(resize, 0);
+  })();
 
-    // Simple input area functionality
-    (() => {
-        const sendBtn = document.getElementById("send-btn");
-        const textarea = document.getElementById("inputTextArea");
-        const attachBtn = document.getElementById("attachFileBtn");
-        const workingIndicator = document.getElementById("working-indicator");
+  // Input area functionality - simplified to work with webview-client.js
+  (() => {
+    const sendBtn = document.getElementById("send-btn");
+    const attachBtn = document.getElementById("attachFileBtn");
+    const workingIndicator = document.getElementById("working-indicator");
 
-        let selectedFiles = [];
-        let isWorking = false;
+    let selectedFiles = [];
+    let isWorking = false;
 
-        function setWorkingState(working) {
-            isWorking = working;
-            if (working) {
-                workingIndicator.classList.remove("hidden");
-                workingIndicator.classList.add("flex");
-                sendBtn.disabled = true;
-                sendBtn.style.opacity = "0.6";
-            } else {
-                workingIndicator.classList.add("hidden");
-                workingIndicator.classList.remove("flex");
-                sendBtn.disabled = false;
-                sendBtn.style.opacity = "1";
-            }
-        }
+    function setWorkingState(working) {
+      isWorking = working;
+      const sendIcon = document.getElementById("send-icon");
+      const loadingIcon = document.getElementById("loading-icon");
 
-        function sendMessage() {
-            const text = textarea.value.trim();
-            if (!text || isWorking) return;
-
-            try {
-                const vscode =
-                    typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
-                if (vscode && window.chatUI) {
-                    const modelDropdown = document.getElementById("model-dropdown");
-                    const modeDropdown = document.getElementById("mode-dropdown");
-
-                    const selectedModel = modelDropdown
-                        ? modelDropdown.dataset.selectedModelId || ""
-                        : "";
-                    const selectedMode = modeDropdown
-                        ? modeDropdown.dataset.selectedModeId || ""
-                        : "";
-
-                    // Prepare message with files appended
-                    let finalPrompt = text;
-                    if (selectedFiles.length > 0) {
-                        const filesWrapper =
-                            "\n\n--- ATTACHED FILES ---\nThe following files have been provided for context:\n\n";
-                        const filesContent = selectedFiles
-                            .map(
-                                (file) => `File: ${file.path}\n\`\`\`\n${file.content}\n\`\`\``
-                            )
-                            .join("\n\n");
-                        finalPrompt = text + filesWrapper + filesContent;
-                    }
-
-                    // Add user message to UI
-                    window.chatUI.addUserMessage(text, {
-                        model: selectedModel,
-                        mode: selectedMode,
-                    });
-
-                    const requestId =
-                        "req_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-                    vscode.postMessage({
-                        command: "sendPrompt",
-                        prompt: finalPrompt,
-                        modelId: selectedModel,
-                        modeId: selectedMode,
-                        requestId: requestId,
-                    });
-
-                    // Clear and show working state
-                    textarea.value = "";
-                    textarea.style.height = "auto";
-                    selectedFiles = [];
-                    setWorkingState(true);
-                    window.chatUI.setLoading(true, {
-                        model: selectedModel,
-                        mode: selectedMode,
-                    });
-                }
-            } catch (e) {
-                console.error("Send message failed:", e);
-                setWorkingState(false);
-            }
-        }
-
-        // Event listeners
+      if (working) {
+        workingIndicator.classList.remove("hidden");
+        workingIndicator.classList.add("flex");
         if (sendBtn) {
-            sendBtn.addEventListener("click", sendMessage);
+          sendBtn.disabled = true;
+          sendBtn.style.opacity = "0.6";
         }
 
-        if (textarea) {
-            textarea.addEventListener("keydown", (e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                }
-            });
+        // Switch to loading icon
+        if (sendIcon) sendIcon.classList.add("hidden");
+        if (loadingIcon) loadingIcon.classList.remove("hidden");
+      } else {
+        workingIndicator.classList.add("hidden");
+        workingIndicator.classList.remove("flex");
+        if (sendBtn) {
+          sendBtn.disabled = false;
+          sendBtn.style.opacity = "1";
         }
 
-        if (attachBtn) {
-            attachBtn.addEventListener("click", () => {
-                try {
-                    const vscode =
-                        typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
-                    if (vscode) {
-                        vscode.postMessage({ command: "selectFiles" });
-                    }
-                } catch (e) {
-                    console.error("File selection failed:", e);
-                }
-            });
+        // Switch back to send icon
+        if (sendIcon) sendIcon.classList.remove("hidden");
+        if (loadingIcon) loadingIcon.classList.add("hidden");
+      }
+    }
+
+    if (attachBtn) {
+      attachBtn.addEventListener("click", () => {
+        try {
+          const vscode =
+            typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
+          if (vscode) {
+            vscode.postMessage({ command: "selectFiles" });
+          }
+        } catch (e) {
+          console.error("File selection failed:", e);
         }
+      });
+    }
 
-        // Listen for file selection and working state changes
-        window.addEventListener("message", (event) => {
-            const message = event.data;
-            if (message.command === "filesSelected") {
-                selectedFiles = message.files || [];
-                // Update button title to show file count
-                if (attachBtn && selectedFiles.length > 0) {
-                    attachBtn.title = `${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""
-                        } attached`;
-                    attachBtn.style.backgroundColor = "#374151";
-                } else {
-                    attachBtn.title = "Attach Files";
-                    attachBtn.style.backgroundColor = "";
-                }
-            } else if (message.command === "clearWorkingStatus") {
-                setWorkingState(false);
-            }
-        });
+    // Listen for file selection and working state changes
+    window.addEventListener("message", (event) => {
+      const message = event.data;
+      if (message.command === "filesSelected") {
+        selectedFiles = message.files || [];
+        // Update button title to show file count
+        if (attachBtn && selectedFiles.length > 0) {
+          attachBtn.title = `${selectedFiles.length} file${
+            selectedFiles.length > 1 ? "s" : ""
+          } attached`;
+          attachBtn.style.backgroundColor = "#374151";
+        } else {
+          attachBtn.title = "Attach Files";
+          attachBtn.style.backgroundColor = "";
+        }
+      } else if (message.command === "clearWorkingStatus") {
+        setWorkingState(false);
+      }
+    });
 
-        // Expose API for external use
-        window.inputAreaAPI = {
-            setWorkingState,
-        };
+    // Expose API for external use
+    window.inputAreaAPI = {
+      setWorkingState,
+    };
 
-        // Add keyboard shortcut handling
-        document.addEventListener("keydown", (e) => {
-            // Ctrl+N for new chat
-            if (e.ctrlKey && e.key === "n") {
-                e.preventDefault();
-                // Trigger new chat
-                try {
-                    if (
-                        window.chatUI &&
-                        typeof window.chatUI.clearMessages === "function"
-                    ) {
-                        window.chatUI.clearMessages();
-                    }
-                    const vscode =
-                        typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
-                    if (vscode) {
-                        vscode.postMessage({ command: "newChat" });
-                    }
-                } catch (e) {
-                    console.error("New chat shortcut failed:", e);
-                }
-            }
-        });
-    })();
+    // Add keyboard shortcut handling
+    document.addEventListener("keydown", (e) => {
+      // Ctrl+N for new chat
+      if (e.ctrlKey && e.key === "n") {
+        e.preventDefault();
+        // Trigger new chat
+        try {
+          if (
+            window.chatUI &&
+            typeof window.chatUI.clearMessages === "function"
+          ) {
+            window.chatUI.clearMessages();
+          }
+          const vscode =
+            typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : null;
+          if (vscode) {
+            vscode.postMessage({ command: "newChat" });
+          }
+        } catch (e) {
+          console.error("New chat shortcut failed:", e);
+        }
+      }
+    });
+  })();
 </script>
