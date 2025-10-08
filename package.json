@@ -2,7 +2,7 @@
   "name": "vsx",
   "displayName": "vsx",
   "description": "VSX",
-  "version": "0.0.36",
+  "version": "0.0.38",
   "publisher": "bhargavjoshi",
   "engines": {
     "vscode": "^1.103.0"
